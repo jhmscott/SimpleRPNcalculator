@@ -21,7 +21,7 @@ char keys[ROWS][COLS] = {
   {'1','2','3'},
   {'4','5','6'},
   {'7','8','9'},
-  {'0','C','\n'}
+  {'0','C','E'}
 };
 
 byte rowPins[ROWS] = {5, 4, 3, 2}; //connect to the row pinouts of the keypad
@@ -41,10 +41,11 @@ void setup() {
 
 void loop() {
   //get a key from the keypad
-  keyPress = keypad.getKey();
+  //keyPress = keypad.getKey();
 
   //if a key was pressed
-  if(keyPress != '\0'){
+  if(Serial.available() > 0){
+    keyPress = Serial.read();
     //if clear key pressed
     if(keyPress == 'C')
     {
@@ -58,7 +59,7 @@ void loop() {
       }
     }
     //if enter was pressed, push the contents of button store to the stack
-    else if(keyPress == '\n'){
+    else if(keyPress == 'E'){
       pushQueueToStack(&buttonStore, &RPNstack);
     }
     //otherwise one of the number buttons was pressed
@@ -71,35 +72,7 @@ void loop() {
     printQueue(&buttonStore);
   }
   
-  /*int incomingByte;
-  int outgoingByte;
-  if (Serial.available() > 0) {
-      // read the incoming byte:
-      incomingByte = Serial.read();
-      switch((char)incomingByte){
-        case '+': outgoingByte = add(&RPNstack);
-        case '-': outgoingByte = sub(&RPNstack);
-        case '*': outgoingByte = mul(&RPNstack);
-        case '/': {
-			outgoingByte = dvd(&RPNstack);
-			if(outgoingByte == DIVIDE_BY_ZERO){
-				Serial.print("Error: divide by zero");
-			}
-		}
-        default:  
-		{
-			outgoingByte = incomingByte;
-			if(outgoingByte == DIVIDE_BY_ZERO){
-				Serial.print("Error: value out of range");
-			}
-		}
-      }
-	  
-	  if(outgoingByte != DIVIDE_BY_ZERO){
-		push(&RPNstack, outgoingByte);
-		Serial.print(outgoingByte);
-	  }
-  }*/
+ 
 
 }
 
@@ -109,7 +82,7 @@ void printQueue(queue* qu){
    int qSize = qu->size;
   //while we haven't reached the end of the q
   while(qSize != 0){
-    temp += qu->data[pos]*pow(10, qu->size-1);
+    temp += qu->data[pos]*power(10, qSize-1);
     //move the position by one
     pos = (pos+1)% MAX_QUEUE_SIZE;
     //decrement the size
@@ -120,14 +93,14 @@ void printQueue(queue* qu){
 
 void printStack(EEstack* st){
   //position in the stack, start at the top
-  int pos = st->topOfStack-sizeof(int);
+  int pos=0, top = st->topOfStack-sizeof(int);
   int temp;
 
   Serial.print('\n');
   Serial.print('\n');
   Serial.print('\n');
   
-  while(pos >= 0){
+  while(pos <= top){
     //get a number from the stack
     EEPROM.get(pos, temp);
     //print the position in the stack followed by its number
@@ -136,7 +109,7 @@ void printStack(EEstack* st){
     Serial.print(temp);
     Serial.print('\n');
     //decrement position
-    pos -= sizeof(int);
+    pos += sizeof(int);
   }
 }
 void pushQueueToStack(queue* qu, EEstack* st){
@@ -145,11 +118,28 @@ void pushQueueToStack(queue* qu, EEstack* st){
   while(!isEmpty(qu)){
     //multiply the digit by 10 to the power of its position
     //add this to the running total
-    temp += Peek(qu)*pow(10, qu->size-1);
+    temp += Peek(qu)*power(10, ((qu->size)-1));
+    
+    /*Serial.print(Peek(qu));
+    Serial.print('\n');
+    Serial.print(temp);
+    Serial.print('\n');
+    Serial.print(qu->size);
+    Serial.print('\n');*/
     //clear the queue as you go through it
     dequeue(qu);
   }
   push(st, temp);
+}
+
+int power(int base, int exponent){
+  int power = 1;
+  while(exponent > 0)
+  {
+    power=power*base;
+    exponent--;
+  }
+  return power;
 }
 
 void clearQueue(queue* qu){
