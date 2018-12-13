@@ -1,10 +1,13 @@
 #include "EEPROM.h"
 #include "Keypad.h"
 
-#define TOP_OF_STACK          32767
+#define TOP_OF_STACK          2147483647
+
+#define INT_MAX               2147483647
+#define INT_MIN               -2147483648
 
 #define LINE_LENGTH           10
-#define MAX_QUEUE_SIZE        10
+#define MAX_QUEUE_SIZE        9
 #define STACK_DISPLAY_HEIGHT  4
 #define SCREEN_WIDTH          3
 #define NUM_FUNCTIONS         4
@@ -51,9 +54,9 @@ struct EEstack{
 };
 
 struct queue{
-	int         data[MAX_QUEUE_SIZE];
-	int         size;
-  int         front;
+	byte        data[MAX_QUEUE_SIZE];
+	byte        size;
+  byte        front;
   boolean     positive;
   numberBase  entryFormat;
 };
@@ -138,6 +141,7 @@ void loop() {
       }
     }
   }
+  //check the error and reset it if it's timed out
   resetError(&RPNstack, &buttonStore);  
 }
 
@@ -232,7 +236,7 @@ void integerMode(EEstack* st, queue* qu, char data){
       }
       case NEGATIVE:{
         if(isEmpty(qu)&&!isEmpty(st)){
-          int temp = Peek(st);
+          long temp = Peek(st);
           pop(st);
           push(st, temp*-1);
         }
@@ -294,22 +298,22 @@ void integerMode(EEstack* st, queue* qu, char data){
 //STACK operations
 //
 //STACK-primitives
-int Peek(EEstack* st){
-  int data = TOP_OF_STACK;
+long Peek(EEstack* st){
+  long data = TOP_OF_STACK;
   if(!isEmpty(st)){
-    EEPROM.get(st->topOfStack - sizeof(int), data);
+    EEPROM.get(st->topOfStack - sizeof(long), data);
   }
   
   return data;
 }
 
-boolean push(EEstack* st, int data){
+boolean push(EEstack* st, long data){
   if(st->topOfStack == EEPROM.length()){
     return false;
   }
   else{
     EEPROM.put(st->topOfStack, data);
-    st->topOfStack+=sizeof(int);
+    st->topOfStack+=sizeof(long);
     //put the top of stack marker above the stack
     EEPROM.put(st->topOfStack, TOP_OF_STACK);
     return true;
@@ -322,7 +326,7 @@ boolean pop(EEstack* st){
   }
   else{
     EEPROM.put(st->topOfStack, TOP_OF_STACK);
-    st->topOfStack-=sizeof(int);
+    st->topOfStack-=sizeof(long);
     return true;
   }
 }
@@ -338,10 +342,11 @@ boolean isEmpty(EEstack* st){
 
 void intStack(EEstack* st)
 {
-  int top = 0, data;
+  int top = 0;
+  long data;
   EEPROM.get(top, data);
   while(data != TOP_OF_STACK){
-    top+=sizeof(int);
+    top+=sizeof(long);
     EEPROM.get(top, data);
   }
   st->displayFormat=decimal;
@@ -352,33 +357,32 @@ void intStack(EEstack* st)
 //STACK -Advanced
 
 void rollUp(EEstack* st, queue* qu){
-  int temp1,temp2;
-  int pos=st->topOfStack-(getQueueValue(qu)*sizeof(int));
-  if(pos>=sizeof(int)&&st->topOfStack>0)
+  long temp1,temp2;
+  int pos=st->topOfStack-(getQueueValue(qu)*sizeof(long));
+  if(pos>=sizeof(long)&&st->topOfStack>0)
   {
     EEPROM.get(pos, temp1);
-    EEPROM.get(pos-sizeof(int), temp2);
+    EEPROM.get(pos-sizeof(long), temp2);
     EEPROM.put(pos, temp2);
-    EEPROM.put(pos-sizeof(int), temp1);
+    EEPROM.put(pos-sizeof(long), temp1);
   }
 }
 
 void rollDown(EEstack* st, queue* qu){
-  int temp1,temp2;
-  int pos=st->topOfStack-(getQueueValue(qu)*sizeof(int));
-  if(pos>=sizeof(int)&&st->topOfStack>0)
+  long temp1,temp2;
+  int pos=st->topOfStack-(getQueueValue(qu)*sizeof(long));
+  if(pos>=sizeof(long)&&st->topOfStack>0)
   {
-    EEPROM.get(pos+sizeof(int), temp1);
+    EEPROM.get(pos+sizeof(long), temp1);
     EEPROM.get(pos, temp2);
-    EEPROM.put(pos+sizeof(int), temp2);
+    EEPROM.put(pos+sizeof(long), temp2);
     EEPROM.put(pos, temp1);
   }
 }
 
 //STACK - Arithmetic
 boolean add(EEstack* st, queue* qu){
-  int num1, num2, result;
-  byte ovf;
+  long num1, num2;
   if(isEmpty(qu)){
     num1 = Peek(st);
     //if you can't pop the stack, then the stack is empty, 
@@ -399,14 +403,20 @@ boolean add(EEstack* st, queue* qu){
     push(st, num1);
     return false;
   }
-  result=num1+num2;
+
+  if(addOverflow(num1, num2)){
+    push(st, num2);
+    push(st, num1);
+    errorState = overFlow;
+    return true;
+  }
   
-  push(st, result);
+  push(st, num1+num2);
   return true;
 }
 
 boolean sub(EEstack* st, queue* qu){
-  int num1, num2;
+  long num1, num2;
   if(isEmpty(qu)){
     num1 = Peek(st);
     //if you can't pop the stack, then the stack is empty, 
@@ -425,13 +435,20 @@ boolean sub(EEstack* st, queue* qu){
   if(!pop(st)){
     push(st, num1);
     return false;
+  }
+
+  if(addOverflow(num1*-1, num2)){
+    push(st, num2);
+    push(st, num1);
+    errorState = overFlow;
+    return true;
   }
   push(st, num2-num1); 
   return true;
 }
 
 boolean mul(EEstack* st, queue* qu){
-  int num1, num2, result;
+  long num1, num2, result;
   if(isEmpty(qu)){
     num1 = Peek(st);
     //if you can't pop the stack, then the stack is empty, 
@@ -452,12 +469,18 @@ boolean mul(EEstack* st, queue* qu){
     return false;
   }
   result = num1*num2;
+  if(mulOverflow(num1, num2, result)){
+    push(st, num2);
+    push(st, num1);
+    errorState = overFlow;
+    return true;
+  }
   push(st, result); 
   return true;   
 }
 
 boolean dvd(EEstack* st, queue* qu){
-  int num1, num2;
+  long num1, num2;
   if(isEmpty(qu)){
     num1 = Peek(st);
     //if you can't pop the stack, then the stack is empty, 
@@ -490,7 +513,7 @@ boolean dvd(EEstack* st, queue* qu){
 }
 
 boolean logicAnd(EEstack* st, queue* qu){
-  int num1, num2;
+  long num1, num2;
   if(isEmpty(qu)){
     num1 = Peek(st);
     //if you can't pop the stack, then the stack is empty, 
@@ -515,7 +538,7 @@ boolean logicAnd(EEstack* st, queue* qu){
 }
 
 boolean logicOr(EEstack* st, queue* qu){
-  int num1, num2;
+  long num1, num2;
   if(isEmpty(qu)){
     num1 = Peek(st);
     //if you can't pop the stack, then the stack is empty, 
@@ -540,7 +563,7 @@ boolean logicOr(EEstack* st, queue* qu){
 }
 
 boolean logicNot(EEstack* st, queue* qu){
-  int num1;
+  long num1;
   if(isEmpty(qu)){
     num1 = Peek(st);
     //if you can't pop the stack, then the stack is empty, 
@@ -557,11 +580,12 @@ boolean logicNot(EEstack* st, queue* qu){
   push(st, ~num1);
   return true;  
 }
+
 //STACK - customs
 void serialPrintStack(EEstack* st){
   //position in the stack, start at the top
-  int pos=0, top = st->topOfStack-sizeof(int);
-  int temp;
+  int pos=0, top = st->topOfStack-sizeof(long);
+  long temp;
 
   Serial.print('\n');
   Serial.print('\n');
@@ -573,27 +597,25 @@ void serialPrintStack(EEstack* st){
     }*/
   
     while(pos <= top){
-      //get a number from the stack
-      EEPROM.get(pos, temp);
-      //print the position in the stack followed by its number
-      Serial.print((((top-pos)/sizeof(int))+1));
+      EEPROM.get(pos, temp);                      //get a number from the stack
+      Serial.print((((top-pos)/sizeof(long))+1));  //print the position in the stack 
       Serial.print(": ");
       if(st->displayFormat == hexadecimal){
-        Serial.print(temp,HEX);
+        Serial.print(temp,HEX);                   //print the value in hex
       }
       else if(st->displayFormat == octal){
-        Serial.print(temp,OCT);
+        Serial.print(temp,OCT);                   //print the value in oct
       }
       else if(st->displayFormat == binary){
-        Serial.print(temp,BIN);
+        Serial.print(temp,BIN);                   //print the value in binary
       }
       else{
-        Serial.print(temp); 
+        Serial.print(temp);                       //print the value in decimal(default)
       }
       
       Serial.print('\n');
       //decrement position
-      pos += sizeof(int);
+      pos += sizeof(long);
     }
   }
 }
@@ -602,11 +624,12 @@ void serialPrintStack(EEstack* st){
 
 //QUEUE - Primitives 
 void intQueue(queue* qu){
-  qu->size=0;
-  qu->front=0;
-  qu->positive=true;
-  qu->entryFormat=decimal;
+  qu->size=0;               //set the size initially to 0
+  qu->front=0;              //set the front initially to 0
+  qu->positive=true;        //intiially make it positive
+  qu->entryFormat=decimal;  //intiially make it decimal
 }
+
 boolean isFull(queue* qu) {
   if(qu->size== MAX_QUEUE_SIZE){
     return true;
@@ -625,7 +648,7 @@ boolean isEmpty(queue* qu){
   }
 }
 
-boolean enqueue(queue* qu, int value){
+boolean enqueue(queue* qu, byte value){
   if(isFull(qu)){
     return false;  
   }
@@ -647,18 +670,19 @@ boolean dequeue(queue* qu){
   }
 }
 
-int Peek(queue* qu){
+byte Peek(queue* qu){
   return qu->data[qu->front];
 }
 
 //QUEUE - Advanced
-int back(queue* qu){
+//remove an item from the back of the queue
+boolean back(queue* qu){
   if(isEmpty(qu)){
     return false;
   }
   else{
-    qu->data[qu->front+ qu->size] = -1;
-    qu->size--;
+    qu->data[qu->front+ qu->size] = -1;   //remove the item from the back
+    qu->size--;                           //decrement teh size
     return true;
   }
 }
@@ -674,21 +698,24 @@ void clearQueue(queue* qu){
 //QUEUE - Customs
 
 void serialPrintQueue(queue* qu){ 
-  int temp = getQueueValue(qu);
+  long temp = getQueueValue(qu);
+  //if there's no error just print the value in the queue
   if(errorState == none){
     if(qu->entryFormat == hexadecimal){
-      Serial.print(temp,HEX);
+      Serial.print(temp,HEX);           //print in hex
     }
     else if(qu->entryFormat == octal){
-      Serial.print(temp,OCT);
+      Serial.print(temp,OCT);           //print in oct
     }
     else if(qu->entryFormat == binary){
-      Serial.print(temp,BIN);
+      Serial.print(temp,BIN);           //print in binary
     }
     else{
-      Serial.print(temp); 
+      Serial.print(temp);               //by default pint in decimal
     }
   }
+
+  ///otherwise print the error in place of the queue
   else if(errorState == divideByZero){
     Serial.print("Error: divideByZero");
   }
@@ -700,13 +727,13 @@ void serialPrintQueue(queue* qu){
   }
 }
 
-int getQueueValue(queue* qu){
-  int temp = 0;
-  int pos = qu->front;
-  int qSize = qu->size;
+long getQueueValue(queue* qu){
+  long temp = 0;
+  byte pos = qu->front;
+  byte qSize = qu->size;
   //while we haven't reached the end of the q
   while(qSize != 0){
-    temp += qu->data[pos]*power(getBase(qu), qSize-1);
+    temp += (long)(qu->data[pos])*power(getBase(qu), qSize-1);
     //move the position by one
     pos = (pos+1)% MAX_QUEUE_SIZE;
     //decrement the size
@@ -720,16 +747,17 @@ int getQueueValue(queue* qu){
 
 
 void pushQueueToStack(queue* qu, EEstack* st){
-  int temp = 0;
+  long temp = 0;
   //while qu still contains items
   while(!isEmpty(qu)){
     //multiply the digit by 10 to the power of its position
     //add this to the running total
-    temp += Peek(qu)*power(getBase(qu), ((qu->size)-1));
+    temp += (long)Peek(qu)*power(getBase(qu), ((qu->size)-1));
     //clear the queue as you go through it
     dequeue(qu);
   }
-  
+
+  //if the number is negative, multiply by -1 before pushing
   if(!qu->positive){
     temp=temp*-1;
   }
@@ -737,39 +765,64 @@ void pushQueueToStack(queue* qu, EEstack* st){
   qu->positive=true;
 }
 
-//Other Functions
+//OVERFLOW DETECTION
+boolean addOverflow(long x, long y){
+  if ((y > 0 && x > INT_MAX - y) || (y < 0 && x < INT_MIN - y)){
+    return true;
+  }
+  else{
+    return false;
+  }
+}
+
+boolean mulOverflow(long x, long y, long result){
+  if((result/x) == y && (result/y) == x){
+    return false;
+  }
+  else{
+    return true;
+  }
+}
+
+//OTHER FUNCTIONS
 void updateSerial(queue* qu, EEstack* st){
     //print the updated stack 
     serialPrintStack(st);
     serialPrintLine();
     serialPrintQueue(qu);
 }
+
+//prints a line in serial monitor
 void serialPrintLine(){
-  int i;
+  byte i;
   for(i=0; i<LINE_LENGTH; i++){
     Serial.print("-");
   }
   Serial.print("\n");
 }
 
-
-int power(int base, int exponent){
-  int power = 1;
-  while(exponent > 0)
-  {
-    power=power*base;
+//returns the base to the power of the exponent
+//only works for integers
+long power(byte base, byte exponent){
+  long power = 1;
+  
+  //loop until the exponent is 0
+  while(exponent > 0){
+    //multiply the power by the base
+    power=power*(long)base;
     exponent--;
   }
   return power;
 }
 
-
-int charToInt(char character){
-  return (int)(character-48); 
+//converts the char to the corrisponding integer number(between 0 and 9)
+byte charToInt(char character){
+  return (byte)(character-48); 
 }
 
-int getBase(queue* qu){
-  int base;
+//returns the base of the entry format
+byte getBase(queue* qu){
+  byte base;
   switch(qu->entryFormat){
     case binary:{
       base = 2;
@@ -791,23 +844,25 @@ int getBase(queue* qu){
   return base;
 }
 
+//returns true if the char is a number in the current entry format
 boolean charIsNumber(char data, queue* qu){
   boolean isNum;
+  //switch the entry format
   switch(qu->entryFormat){
     case binary:{
-      isNum = (data >= '0' && data <='1');
+      isNum = (data >= '0' && data <='1');    //if between 0 and 1 for binary
       break;
     }
     case octal:{
-      isNum = (data >= '0' && data <='7');
+      isNum = (data >= '0' && data <='7');    //if between 0 and 7 for octal
       break;
     }
     case decimal:{
-      isNum = (data >= '0' && data <='9');
+      isNum = (data >= '0' && data <='9');    //if between 0 and 9 for decimal
       break;
     }
     case hexadecimal:{
-      isNum = (data >= '0' && data <='9');
+      isNum = (data >= '0' && data <='9');    //if between 0 and 9 for hexadecimal
       break;
     }
   }
@@ -815,55 +870,69 @@ boolean charIsNumber(char data, queue* qu){
 }
 
 void serialPrintCatalogue(queue* qu){
-  int i;
+  byte i;
   
   Serial.print('\n');
   Serial.print('\n');
   Serial.print('\n');
-  
+  //print the names and numbers of all the functions
   for(i=STACK_DISPLAY_HEIGHT; i>0; i--){
-    Serial.print(i+(NUM_FUNCTIONS*rowLevel));
+    //print the function number
+    Serial.print(i+(NUM_FUNCTIONS*rowLevel)); 
     Serial.print(": ");
+    //print the function name
     Serial.print(functionNames[i+(NUM_FUNCTIONS*rowLevel)-1]);
     Serial.print('\n');
   }
 
+  //print the line followed by the value in the queue
   serialPrintLine();
   serialPrintQueue(qu);
 }
 
 void resetError(EEstack* st, queue* qu){
-  unsigned long time = millis();
-  if(errorState != none){
-    if(!timerSet){
-      timeSinceError = time;
-      timerSet = true;  
+  unsigned long time = millis();    //save the current time
+  if(errorState != none){           //if there is an error
+    if(!timerSet){                  //if the timer hasn't been set
+      timeSinceError = time;        //save the current time to a global variable
+      timerSet = true;              //set the timer flag, so we no the timer has been checked
     }
+    //if the time since the error ocured is greater than or equal to the timeout
     else if(time-timeSinceError >= ERROR_TIMEOUT){
-      errorState = none;
-      timerSet = false;
-      updateSerial(qu, st);
+      errorState = none;            //reset the error
+      timerSet = false;             //reset the timer flag
+      updateSerial(qu, st);         //update the screen
     }
   }
 }
 
+//state0 - both entry and displays in decimal
+//state1 - display format is the specified format
+//state2 - entry format is the specified format
+//state3 - both entry and displays in the specified format
 void changeFormat(EEstack* st, queue* qu, numberBase format){
+  //go from state back to state0
   if(st->displayFormat==format&&qu->entryFormat==format){
     st->displayFormat=decimal;
     qu->entryFormat=decimal; 
   }
+  //go from state0 to state1
   else if(st->displayFormat==decimal&&qu->entryFormat==decimal){
     st->displayFormat=format;
     qu->entryFormat=decimal; 
   }
+  //go from state1 to state2
   else if(st->displayFormat==format&&qu->entryFormat==decimal){
     st->displayFormat=decimal;
     qu->entryFormat=format; 
   }
+  //go from state2 to state3
   else if(st->displayFormat==decimal&&qu->entryFormat==format){
     st->displayFormat=format;
     qu->entryFormat=format; 
   }
+  //if in some other unrecognized state go to state1
+  //ie it moved from a different format
   else {
     st->displayFormat=format;
     qu->entryFormat=decimal; 
