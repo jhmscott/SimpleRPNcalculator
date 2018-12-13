@@ -41,7 +41,8 @@ enum mode{
 enum error{
   none,
   divideByZero,
-  overFlow
+  overFlow,
+  stack
 };
 
 struct EEstack{
@@ -188,31 +189,45 @@ void integerMode(EEstack* st, queue* qu, char data){
         break;
       }
       case '+':{
-        add(st, qu);
+        if(!add(st, qu)){
+          errorState = stack;
+        }
         break;
       }
       case '-':{
-        sub(st, qu);
+        if(!sub(st, qu)){
+          errorState = stack;
+        }
         break;
       }
       case '*':{
-        mul(st, qu);
+        if(!mul(st, qu)){
+          errorState = stack;
+        }
         break;
       }
       case '/':{
-        dvd(st, qu);
+        if(!dvd(st, qu)){
+          errorState = stack;
+        }
         break;
       }
       case '&':{
-        logicAnd(st, qu);
+        if(!logicAnd(st, qu)){
+          errorState = stack;
+        }
         break;
       }
       case '|':{
-        logicOr(st, qu);
+        if(!logicOr(st, qu)){
+          errorState = stack;
+        }
         break;
       }
       case '~':{
-        logicNot(st, qu);
+        if(!logicNot(st, qu)){
+          errorState = stack;
+        }
         break;
       }
       case NEGATIVE:{
@@ -390,101 +405,157 @@ boolean add(EEstack* st, queue* qu){
   return true;
 }
 
-void sub(EEstack* st, queue* qu){
+boolean sub(EEstack* st, queue* qu){
   int num1, num2;
   if(isEmpty(qu)){
     num1 = Peek(st);
-    pop(st);
+    //if you can't pop the stack, then the stack is empty, 
+    //so you can complete the operation
+    if(!pop(st)){
+      return false;
+    }
   }
   else{
     num1 = getQueueValue(qu);
     clearQueue(qu);
   }
   num2 = Peek(st);
-  pop(st);
+  //if you can't pop the stack, then the stack is empty, 
+  //so you can complete the operation
+  if(!pop(st)){
+    push(st, num1);
+    return false;
+  }
   push(st, num2-num1); 
+  return true;
 }
 
-void mul(EEstack* st, queue* qu){
+boolean mul(EEstack* st, queue* qu){
   int num1, num2, result;
   if(isEmpty(qu)){
     num1 = Peek(st);
-    pop(st);
+    //if you can't pop the stack, then the stack is empty, 
+    //so you can complete the operation
+    if(!pop(st)){
+      return false;
+    }
   }
   else{
     num1 = getQueueValue(qu);
     clearQueue(qu);
   }
   num2 = Peek(st);
-  pop(st);
+  //if you can't pop the stack, then the stack is empty, 
+  //so you can complete the operation
+  if(!pop(st)){
+    push(st, num1);
+    return false;
+  }
   result = num1*num2;
-  push(st, result);    
+  push(st, result); 
+  return true;   
 }
 
-void dvd(EEstack* st, queue* qu){
+boolean dvd(EEstack* st, queue* qu){
   int num1, num2;
   if(isEmpty(qu)){
     num1 = Peek(st);
-    pop(st);
+    //if you can't pop the stack, then the stack is empty, 
+    //so you can complete the operation
+    if(!pop(st)){
+      return false;
+    }
   }
   else{
     num1 = getQueueValue(qu);
     clearQueue(qu);
   }
   num2 = Peek(st);
-  pop(st);
+  //if you can't pop the stack, then the stack is empty, 
+  //so you can complete the operation
+  if(!pop(st)){
+    push(st, num1);
+    return false;
+  }
   if(num1 == 0){
     errorState=divideByZero;
     push(st, num2);
     push(st, num1);
+    
   }
   else{
     push(st, num2/num1);;  
   }
+  return true;
 }
 
-void logicAnd(EEstack* st, queue* qu){
+boolean logicAnd(EEstack* st, queue* qu){
   int num1, num2;
   if(isEmpty(qu)){
     num1 = Peek(st);
-    pop(st);
+    //if you can't pop the stack, then the stack is empty, 
+    //so you can complete the operation
+    if(!pop(st)){
+      return false;
+    }
   }
   else{
     num1 = getQueueValue(qu);
     clearQueue(qu);
   }
   num2 = Peek(st);
-  pop(st);
-  push(st, num1&num2);;  
+  //if you can't pop the stack, then the stack is empty, 
+  //so you can complete the operation
+  if(!pop(st)){
+    push(st, num1);
+    return false;
+  }
+  push(st, num1&num2);
+  return true;  
 }
 
-void logicOr(EEstack* st, queue* qu){
+boolean logicOr(EEstack* st, queue* qu){
   int num1, num2;
   if(isEmpty(qu)){
     num1 = Peek(st);
-    pop(st);
+    //if you can't pop the stack, then the stack is empty, 
+    //so you can complete the operation
+    if(!pop(st)){
+      return false;
+    }
   }
   else{
     num1 = getQueueValue(qu);
     clearQueue(qu);
   }
   num2 = Peek(st);
-  pop(st);
-  push(st, num1|num2);;  
+  //if you can't pop the stack, then the stack is empty, 
+  //so you can complete the operation
+  if(!pop(st)){
+    push(st, num1);
+    return false;
+  }
+  push(st, num1|num2);
+  return true;  
 }
 
-void logicNot(EEstack* st, queue* qu){
+boolean logicNot(EEstack* st, queue* qu){
   int num1;
   if(isEmpty(qu)){
     num1 = Peek(st);
-    pop(st);
+    //if you can't pop the stack, then the stack is empty, 
+    //so you can complete the operation
+    if(!pop(st)){
+      return false;
+    }
   }
   else{
     num1 = getQueueValue(qu);
     clearQueue(qu);
   }
 
-  push(st, ~num1);;  
+  push(st, ~num1);
+  return true;  
 }
 //STACK - customs
 void serialPrintStack(EEstack* st){
@@ -622,7 +693,10 @@ void serialPrintQueue(queue* qu){
     Serial.print("Error: divideByZero");
   }
   else if(errorState == overFlow){
-    Serial.print("Error: divideByZero");
+    Serial.print("Error: overflow");
+  }
+  else if(errorState == stack){
+    Serial.print("Error: not enough items on stack");
   }
 }
 
