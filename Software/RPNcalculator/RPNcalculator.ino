@@ -3,13 +3,13 @@
 
 #define TOP_OF_STACK          2147483647
 
-#define INT_MAX               2147483647
+#define INT_MAX               2147483646
 #define INT_MIN               -2147483648
 
-#define LINE_LENGTH           10
 #define MAX_QUEUE_SIZE        9
 #define STACK_DISPLAY_HEIGHT  4
-#define SCREEN_WIDTH          3
+#define SCREEN_WIDTH          14
+#define FUNC_NAME_LENGTH      3
 #define NUM_FUNCTIONS         4
 #define ROWS                  6 //four rows
 #define COLS                  5 //four columns
@@ -45,7 +45,8 @@ enum error{
   none,
   divideByZero,
   overFlow,
-  stack
+  stack,
+  doesNotExist
 };
 
 struct EEstack{
@@ -70,7 +71,7 @@ char keys[ROWS][COLS] = {
   {'0','.',NEGATIVE,ENTER,BINARY}
 };
 
-const char functionNames[NUM_FUNCTIONS][SCREEN_WIDTH+1] = {
+const char functionNames[NUM_FUNCTIONS][FUNC_NAME_LENGTH+1] = {
   "pow",
   "qdr",
   "prs",
@@ -122,7 +123,7 @@ void loop() {
         break;
       }
       case func:{
-        functionMode(&buttonStore, keyPress);
+        functionMode(&RPNstack, &buttonStore, keyPress);
         break;
       }
     }
@@ -146,7 +147,7 @@ void loop() {
 }
 
 //Mode functions
-void functionMode(queue*qu, char data){
+void functionMode(EEstack* st, queue*qu, char data){
   switch(data){
     case ADV_FUNC:{
       calcMode=prevMode;
@@ -163,9 +164,24 @@ void functionMode(queue*qu, char data){
       back(qu);
       break;
     }
+    case ENTER:{
+      if(!isEmpty(qu)) {
+        long qValue = getQueueValue(qu);
+        if(qValue < NUM_FUNCTIONS && qValue > 0){
+          if(!callFunction((byte)qValue, st)){
+            errorState =  stack;
+          }
+          calcMode = prevMode;
+          clearQueue(qu);
+        }
+        else {
+          errorState = doesNotExist;
+        }
+      }
+    }
     default:{
       //convert it to an int and enqueue that value
-      if(data >= '0' && data <='9'){
+      if(charIsNumber(data, qu)){
         enqueue(qu, charToInt(data));
         break; 
       }
@@ -275,7 +291,9 @@ void integerMode(EEstack* st, queue* qu, char data){
         break;
       }
       case BACK_SPACE:{
-        back(qu);
+        if(!back(qu)){
+          pop(st); 
+        }
         break;
       }
       case ADV_FUNC:{
@@ -581,6 +599,68 @@ boolean logicNot(EEstack* st, queue* qu){
   return true;  
 }
 
+boolean pwr(EEstack* st){
+  long base, exponent;
+
+  exponent = Peek(st);
+  if(!pop(st)){
+    return false;
+  }
+  base = Peek(st);
+  if(!pop(st)){
+    push(st, exponent);
+    return false;
+  }
+  push(st, power(base, exponent));
+  return true;
+}
+
+boolean qdr(EEstack* st){
+  long a, b, c, root1, root2;
+
+  c = Peek(st);
+  if(!pop(st)){
+    return false;
+  }
+  
+  b = Peek(st);
+  if(!pop(st)){
+    push(st, c);
+    return false;
+  }
+  
+  a = Peek(st);
+  if(!pop(st)){
+    push(st, b);
+    push(st, c);
+    return false;
+  }
+
+  root1 = ((0-b)+sqrt((b*b)-(4*a*c)))/(2*a);
+  root2 = ((0-b)-sqrt((b*b)-(4*a*c)))/(2*a);
+
+  push(st, root1);
+  push(st, root2);
+  return true;
+  
+}
+
+boolean rr(EEstack* st){
+  long r1, r2;
+  r1 = Peek(st);
+  if(!pop(st)){
+    return false;
+  }
+
+  r2 = Peek(st);
+  if(!pop(st)){
+    push(st, r1);
+    return false;
+  }
+  push(st,((r1*r2)/(r1+r2)));
+  return true;
+}
+
 //STACK - customs
 void serialPrintStack(EEstack* st){
   //position in the stack, start at the top
@@ -717,13 +797,16 @@ void serialPrintQueue(queue* qu){
 
   ///otherwise print the error in place of the queue
   else if(errorState == divideByZero){
-    Serial.print("Error: divideByZero");
+    Serial.print("Error: Divide0");
   }
   else if(errorState == overFlow){
-    Serial.print("Error: overflow");
+    Serial.print("Error: OverF");
   }
   else if(errorState == stack){
-    Serial.print("Error: not enough items on stack");
+    Serial.print("Error: Stack");
+  }
+  else if(errorState == doesNotExist){
+    Serial.print("Error: Func");  
   }
 }
 
@@ -795,7 +878,7 @@ void updateSerial(queue* qu, EEstack* st){
 //prints a line in serial monitor
 void serialPrintLine(){
   byte i;
-  for(i=0; i<LINE_LENGTH; i++){
+  for(i=0; i<SCREEN_WIDTH; i++){
     Serial.print("-");
   }
   Serial.print("\n");
@@ -803,13 +886,13 @@ void serialPrintLine(){
 
 //returns the base to the power of the exponent
 //only works for integers
-long power(byte base, byte exponent){
+long power(long base, long exponent){
   long power = 1;
   
   //loop until the exponent is 0
   while(exponent > 0){
     //multiply the power by the base
-    power=power*(long)base;
+    power=power*base;
     exponent--;
   }
   return power;
@@ -937,4 +1020,28 @@ void changeFormat(EEstack* st, queue* qu, numberBase format){
     st->displayFormat=format;
     qu->entryFormat=decimal; 
   }
+}
+
+
+boolean callFunction(byte funcNum, EEstack * st){
+  boolean success = true;
+  switch(funcNum){
+    case 1:{
+      success = pwr(st);
+      break;
+    }
+    case 2:{
+      success = qdr(st);
+      break;
+    }
+    case 3:{
+      success = rr(st);
+      break;
+    }
+    default:{
+      errorState = doesNotExist;
+      break; 
+    }
+  }
+  return success;
 }
