@@ -10,7 +10,7 @@
 #define STACK_DISPLAY_HEIGHT  4
 #define SCREEN_WIDTH          14
 #define FUNC_NAME_LENGTH      3
-#define NUM_FUNCTIONS         4
+#define NUM_FUNCTIONS         5
 #define ROWS                  6 //four rows
 #define COLS                  5 //four columns
 #define ERROR_TIMEOUT         1000
@@ -75,7 +75,8 @@ const char functionNames[NUM_FUNCTIONS][FUNC_NAME_LENGTH+1] = {
   "pow",
   "qdr",
   "prs",
-  "dtw"
+  "dtw",
+  "sqr"
 };
 
 byte rowPins[ROWS] = {5, 4, 3, 2}; //connect to the row pinouts of the keypad
@@ -97,11 +98,17 @@ unsigned long timeSinceError;
 boolean       timerSet;
 
 void setup() {
+  pinMode(LED_BUILTIN, OUTPUT);
+  digitalWrite(LED_BUILTIN, LOW);
+  
   intStack(&RPNstack);
   intQueue(&buttonStore);
+  
   calcMode=integer;
   errorState=none;
   timerSet=false;
+  rowLevel=0;
+  
   Serial.begin(9600);
   updateSerial(&buttonStore, &RPNstack);
 }
@@ -157,17 +164,32 @@ void functionMode(EEstack* st, queue*qu, char data){
       //if nothing has been entered in the button store, pop the most recent item off the stack
       if(!isEmpty(qu)) {
         clearQueue(qu);
-      }  
+      }
+      else{
+        calcMode = prevMode;
+      }
       break;  
     }
+    
     case BACK_SPACE:{
       back(qu);
       break;
     }
+    case ROLL_UP:{
+      if(rowLevel < NUM_FUNCTIONS/STACK_DISPLAY_HEIGHT){
+        rowLevel++;
+      }
+      break;
+    }
+    case ROLL_DOWN:{
+      if(rowLevel > 0){
+        rowLevel--;
+      }
+    }
     case ENTER:{
       if(!isEmpty(qu)) {
         long qValue = getQueueValue(qu);
-        if(qValue < NUM_FUNCTIONS && qValue > 0){
+        if(qValue <= NUM_FUNCTIONS && qValue > 0){
           if(!callFunction((byte)qValue, st)){
             errorState =  stack;
           }
@@ -176,6 +198,7 @@ void functionMode(EEstack* st, queue*qu, char data){
         }
         else {
           errorState = doesNotExist;
+          calcMode = prevMode;
         }
       }
     }
@@ -205,7 +228,12 @@ void integerMode(EEstack* st, queue* qu, char data){
       }
       //if enter was pressed, push the contents of button store to the stack
       case ENTER: {
-        pushQueueToStack(qu, st);
+        if(!isEmpty(qu)){
+          pushQueueToStack(qu, st);
+        }
+        else if(!isEmpty(st)){
+          copy(st);
+        }
         break;
       }
       case '+':{
@@ -396,6 +424,11 @@ void rollDown(EEstack* st, queue* qu){
     EEPROM.put(pos+sizeof(long), temp2);
     EEPROM.put(pos, temp1);
   }
+}
+
+void copy(EEstack* st){
+  long temp = Peek(st);
+  push(st, temp);
 }
 
 //STACK - Arithmetic
@@ -661,6 +694,15 @@ boolean rr(EEstack* st){
   return true;
 }
 
+boolean sqr(EEstack* st){
+  long num;
+  num = Peek(st);
+  if(!pop(st)){
+    return false;
+  }
+  push(st, num*num);
+  return true;  
+}
 //STACK - customs
 void serialPrintStack(EEstack* st){
   //position in the stack, start at the top
@@ -783,12 +825,24 @@ void serialPrintQueue(queue* qu){
   if(errorState == none){
     if(qu->entryFormat == hexadecimal){
       Serial.print(temp,HEX);           //print in hex
+      for(byte i = 0; i < (SCREEN_WIDTH-4-(qu->size)); i++){
+        Serial.print(" ");
+      }
+      Serial.print("HEX");
     }
     else if(qu->entryFormat == octal){
       Serial.print(temp,OCT);           //print in oct
+      for(byte i = 0; i < (SCREEN_WIDTH-4-(qu->size)); i++){
+        Serial.print(" ");
+      }
+      Serial.print("OCT");
     }
     else if(qu->entryFormat == binary){
       Serial.print(temp,BIN);           //print in binary
+      for(byte i = 0; i < (SCREEN_WIDTH-4-(qu->size)); i++){
+        Serial.print(" ");
+      }
+      Serial.print("BIN");
     }
     else{
       Serial.print(temp);               //by default pint in decimal
@@ -953,18 +1007,21 @@ boolean charIsNumber(char data, queue* qu){
 }
 
 void serialPrintCatalogue(queue* qu){
-  byte i;
+  byte i, funcNum;
   
   Serial.print('\n');
   Serial.print('\n');
   Serial.print('\n');
   //print the names and numbers of all the functions
   for(i=STACK_DISPLAY_HEIGHT; i>0; i--){
+    funcNum = i+(STACK_DISPLAY_HEIGHT*rowLevel);
     //print the function number
-    Serial.print(i+(NUM_FUNCTIONS*rowLevel)); 
-    Serial.print(": ");
-    //print the function name
-    Serial.print(functionNames[i+(NUM_FUNCTIONS*rowLevel)-1]);
+    if(funcNum <= NUM_FUNCTIONS){
+      Serial.print(funcNum); 
+      Serial.print(": ");
+      //print the function name
+      Serial.print(functionNames[funcNum-1]);
+    }
     Serial.print('\n');
   }
 
@@ -998,27 +1055,32 @@ void changeFormat(EEstack* st, queue* qu, numberBase format){
   if(st->displayFormat==format&&qu->entryFormat==format){
     st->displayFormat=decimal;
     qu->entryFormat=decimal; 
+    digitalWrite(LED_BUILTIN, LOW);
   }
   //go from state0 to state1
   else if(st->displayFormat==decimal&&qu->entryFormat==decimal){
     st->displayFormat=format;
-    qu->entryFormat=decimal; 
+    qu->entryFormat=decimal;
+    digitalWrite(LED_BUILTIN, HIGH); 
   }
   //go from state1 to state2
   else if(st->displayFormat==format&&qu->entryFormat==decimal){
     st->displayFormat=decimal;
     qu->entryFormat=format; 
+    digitalWrite(LED_BUILTIN, LOW);
   }
   //go from state2 to state3
   else if(st->displayFormat==decimal&&qu->entryFormat==format){
     st->displayFormat=format;
     qu->entryFormat=format; 
+    digitalWrite(LED_BUILTIN, HIGH); 
   }
   //if in some other unrecognized state go to state1
   //ie it moved from a different format
   else {
     st->displayFormat=format;
     qu->entryFormat=decimal; 
+    digitalWrite(LED_BUILTIN, HIGH); 
   }
 }
 
@@ -1038,8 +1100,12 @@ boolean callFunction(byte funcNum, EEstack * st){
       success = rr(st);
       break;
     }
+    case 5:{
+      success = sqr(st);
+      break;
+    }
     default:{
-      errorState = doesNotExist;
+      //errorState = doesNotExist;
       break; 
     }
   }
