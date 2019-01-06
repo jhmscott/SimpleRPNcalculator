@@ -65,9 +65,9 @@ struct queue{
 char keys[ROWS][COLS] = {
   {ROLL_UP,ROLL_DOWN,CLEAR,BACK_SPACE, ADV_FUNC},
   {'&','|','~',     '+',  FLOATING},
-  {'1','2','3',     '-',  HEXADECIMAL},
+  {'7','8','9',     '-',  HEXADECIMAL},
   {'4','5','6',     '*',  DECIMAL},
-  {'7','8','9',     '/',  OCTAL},
+  {'1','2','3',     '/',  OCTAL},
   {'0','.',NEGATIVE,ENTER,BINARY}
 };
 
@@ -79,8 +79,8 @@ const char functionNames[NUM_FUNCTIONS][FUNC_NAME_LENGTH+1] = {
   "sqr"
 };
 
-byte rowPins[ROWS] = {5, 4, 3, 2}; //connect to the row pinouts of the keypad
-byte colPins[COLS] = {8, 7, 6}; //connect to the column pinouts of the keypad
+byte rowPins[ROWS] = {0, 1, 3, 4, 5, 6}; //connect to the row pinouts of the keypad
+byte colPins[COLS] = {8, 9, 10, 11, 12}; //connect to the column pinouts of the keypad
 
 
 Keypad keypad = Keypad( makeKeymap(keys), rowPins, colPins, ROWS, COLS);
@@ -98,28 +98,36 @@ unsigned long timeSinceError;
 boolean       timerSet;
 
 void setup() {
-  pinMode(LED_BUILTIN, OUTPUT);
-  digitalWrite(LED_BUILTIN, LOW);
-  
+  pinMode(13, OUTPUT);
+  digitalWrite(13, LOW);
+  Serial.begin(9600);
+
+  Serial.print("serial started\n");
   intStack(&RPNstack);
+  Serial.print("initiated stack\n");
   intQueue(&buttonStore);
+  Serial.print("initiated queue\n");
   
   calcMode=integer;
   errorState=none;
   timerSet=false;
   rowLevel=0;
   
-  Serial.begin(9600);
+  
+  
+  
   updateSerial(&buttonStore, &RPNstack);
+  
+  
+  
 }
 
 void loop() {
   //get a key from the keypad
-  //keyPress = keypad.getKey();
+  keyPress = keypad.getKey();
 
   //if a key was pressed
-  if(Serial.available() > 0){
-    keyPress = Serial.read();
+  if(keyPress != '\0'  && keypad.keyStateChanged()){
     //first parse the data according to the appropriate mode
     switch(calcMode){
       case integer:{
@@ -211,7 +219,6 @@ void functionMode(EEstack* st, queue*qu, char data){
     }
   }  
 }
-
 
 void integerMode(EEstack* st, queue* qu, char data){
   switch(data){
@@ -339,6 +346,12 @@ void integerMode(EEstack* st, queue* qu, char data){
         }
       }
     }
+}
+
+void floatingMode(EEstack* st, queue* qu, char data){
+  switch(data){
+    default: break;
+  }
 }
 
 //STACK operations
@@ -880,6 +893,26 @@ long getQueueValue(queue* qu){
     temp=temp*-1;
   }
   return temp;
+}
+
+boolean setQueueValue(queue* qu, long value){
+  byte i, digit, base = getBase(qu);
+  long temp = value/base;
+
+  while(temp != 0){
+    temp = temp/base;
+    i++;
+  }
+
+  clearQueue(qu);
+  temp = value;
+
+  while(i > 0){
+    i--;
+    digit = temp/power(base, i);
+    temp = temp - digit*power(base, i);
+    enqueue(qu, digit);
+  }
 }
 
 
