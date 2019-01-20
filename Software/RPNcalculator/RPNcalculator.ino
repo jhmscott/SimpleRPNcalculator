@@ -1,10 +1,14 @@
+#include <SPI.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_PCD8544.h>
 #include "EEPROM.h"
 #include "Keypad.h"
 
 #define TOP_OF_STACK          2147483647
-
+#define INT_STACK_MAX         512
 #define INT_MAX               2147483646
 #define INT_MIN               -2147483648
+#define NO_DECIMAL            100
 
 #define MAX_QUEUE_SIZE        9
 #define STACK_DISPLAY_HEIGHT  4
@@ -28,6 +32,14 @@
 #define FLOATING              'F'
 #define ADV_FUNC              'A'
 
+#define NUMFLAKES 10
+#define XPOS 0
+#define YPOS 1
+#define DELTAY 2
+
+#define LOGO16_GLCD_HEIGHT 16
+#define LOGO16_GLCD_WIDTH  16
+
 enum numberBase{
   binary,
   octal,
@@ -49,9 +61,28 @@ enum error{
   doesNotExist
 };
 
+enum complexFormat{
+  polar,
+  rectangular,
+  binomial,
+  ECEbinomial
+};
+
+struct ComplexFloat{
+  float   real;
+  float   imaginary;
+  boolean top;
+  byte    numDecimals;
+};
+
 struct EEstack{
   int         topOfStack;
   numberBase  displayFormat;
+};
+
+struct FPstack{
+  int             topOfStack;
+  complexFormat   displayFormat;
 };
 
 struct queue{
@@ -62,12 +93,93 @@ struct queue{
   numberBase  entryFormat;
 };
 
+struct FPqueue{
+  byte        data[MAX_QUEUE_SIZE];
+  byte        size;
+  byte        front;
+  boolean     positive;
+  byte        decimal;
+};
+
+static const unsigned char PROGMEM logo16_glcd_bmp[] = {
+  B00000000, B11000000,
+  B00000001, B11000000,
+  B00000001, B11000000,
+  B00000011, B11100000,
+  B11110011, B11100000,
+  B11111110, B11111000,
+  B01111110, B11111111,
+  B00110011, B10011111,
+  B00011111, B11111100,
+  B00001101, B01110000,
+  B00011011, B10100000,
+  B00111111, B11100000,
+  B00111111, B11110000,
+  B01111100, B11110000,
+  B01110000, B01110000,
+  B00000000, B00110000 
+  };
+  
+static const uint8_t PROGMEM EMPTY_BATTERY[] = { 
+  B00100000,
+  B01110000,
+  B01010000,
+  B01010000,
+  B01010000,
+  B01010000,
+  B01110000,
+  B00000000
+};
+
+static const uint8_t PROGMEM QUARTER_BATTERY[] = { 
+  B00100000,
+  B01110000,
+  B01010000,
+  B01010000,
+  B01010000,
+  B01110000,
+  B01110000,
+  B00000000
+};
+
+static const uint8_t PROGMEM HALF_BATTERY[] = { 
+  B00100000,
+  B01110000,
+  B01010000,
+  B01010000,
+  B01110000,
+  B01110000,
+  B01110000,
+  B00000000
+};
+
+static const uint8_t PROGMEM THREE_QUARTER_BATTERY[] = { 
+  B00100000,
+  B01110000,
+  B01010000,
+  B01110000,
+  B01110000,
+  B01110000,
+  B01110000,
+  B00000000
+};
+
+static const uint8_t PROGMEM FULL_BATTERY[] = { 
+  B00100000,
+  B01110000,
+  B01110000,
+  B01110000,
+  B01110000,
+  B01110000,
+  B01110000,
+  B00000000
+};
 char keys[ROWS][COLS] = {
   {ROLL_UP,ROLL_DOWN,CLEAR,BACK_SPACE, ADV_FUNC},
-  {'&','|','~',     '+',  FLOATING},
-  {'7','8','9',     '-',  HEXADECIMAL},
-  {'4','5','6',     '*',  DECIMAL},
-  {'1','2','3',     '/',  OCTAL},
+  {'&','|','~',     '/',  FLOATING},
+  {'7','8','9',     '*',  HEXADECIMAL},
+  {'4','5','6',     '-',  DECIMAL},
+  {'1','2','3',     '+',  OCTAL},
   {'0','.',NEGATIVE,ENTER,BINARY}
 };
 
@@ -79,46 +191,67 @@ const char functionNames[NUM_FUNCTIONS][FUNC_NAME_LENGTH+1] = {
   "sqr"
 };
 
-byte rowPins[ROWS] = {0, 1, 3, 4, 5, 6}; //connect to the row pinouts of the keypad
-byte colPins[COLS] = {8, 9, 10, 11, 12}; //connect to the column pinouts of the keypad
+byte rowPins[ROWS] = {0, 1,  A0, 9, A1, 6}; //connect to the row pinouts of the keypad
+byte colPins[COLS] = {8, A2, A3, A4, A5}; //connect to the column pinouts of the keypad
 
-
+// SCK is LCD serial clock (SCLK) - this is pin 13 on Arduino Uno
+// MOSI is LCD DIN - this is pin 11 on an Arduino Uno
+// pin 5 - Data/Command select (D/C)
+// pin 4 - LCD chip select (CS)
+// pin 3 - LCD reset (RST)
+Adafruit_PCD8544 display = Adafruit_PCD8544(5, 4, 3);
 Keypad keypad = Keypad( makeKeymap(keys), rowPins, colPins, ROWS, COLS);
 
 EEstack       RPNstack;
+FPstack       FLTstack;
 queue         buttonStore;
+FPqueue       FLTstore;
 
 mode          calcMode;
 mode          prevMode;
 error         errorState;
 
+ComplexFloat  floatingTopOfStack;
+
 char          keyPress;
 byte          rowLevel;
 unsigned long timeSinceError;
-boolean       timerSet;
+boolean       timerSet; 
 
 void setup() {
   pinMode(13, OUTPUT);
   digitalWrite(13, LOW);
-  Serial.begin(9600);
-
-  Serial.print("serial started\n");
+  //Serial.begin(9600);
+  floatingTopOfStack.top=true;
+  //Serial.print("serial started\n");
   intStack(&RPNstack);
-  Serial.print("initiated stack\n");
+  intStack(&FLTstack);
+  //Serial.print("initiated stack\n");
   intQueue(&buttonStore);
-  Serial.print("initiated queue\n");
+  intQueue(&FLTstore);
+  //Serial.print("initiated queue\n");
   
   calcMode=integer;
   errorState=none;
   timerSet=false;
   rowLevel=0;
   
+  display.begin();
+  display.setContrast(60);
+  display.display();
+  delay(2000);
+  display.clearDisplay();
   
   
+  display.setTextSize(1);
+  display.setTextColor(BLACK);
+  display.setCursor(0,0);
   
-  updateSerial(&buttonStore, &RPNstack);
-  
-  
+  //updateSerial(&buttonStore, &RPNstack);
+  updateDisplay(&buttonStore, &RPNstack);
+
+  //discard the first value from the keypad(garbage value)
+  keypad.getKey();
   
 }
 
@@ -135,6 +268,7 @@ void loop() {
         break;
       }
       case floating:{
+        floatingMode(&FLTstack, &FLTstore, keyPress);
         break;
       }
       case func:{
@@ -145,14 +279,17 @@ void loop() {
     //switch mode again after, it may have been changed by the mode its in  
     switch(calcMode){
       case integer:{
-        updateSerial(&buttonStore, &RPNstack);
+        //updateSerial(&buttonStore, &RPNstack);
+        updateDisplay(&buttonStore, &RPNstack);
         break;
       }
       case floating:{
+        updateDisplay(&FLTstore, &FLTstack);
         break;
       }
       case func:{
-        serialPrintCatalogue(&buttonStore);
+        displayPrintCatalogue(&buttonStore);
+        //serialPrintCatalogue(&buttonStore);
         break;
       }
     }
@@ -301,11 +438,15 @@ void integerMode(EEstack* st, queue* qu, char data){
         break;  
       }
       case ROLL_UP:{
-        rollUp(st,qu);
+        if(!isEmpty(qu)){
+          rollUp(st,qu); 
+        }
         break;
       }
       case ROLL_DOWN:{
-        rollDown(st,qu);
+        if(!isEmpty(qu)){
+          rollDown(st,qu); 
+        }
         break;
       }
       case BINARY:{
@@ -337,23 +478,61 @@ void integerMode(EEstack* st, queue* qu, char data){
         rowLevel = 0;
         break;
       }
+      case FLOATING:{
+        prevMode = calcMode;
+        calcMode = floating;
+        break;
+      }
       //otherwise one of the number buttons was pressed
       default:{
         //convert it to an int and enqueue that value
         if(charIsNumber(data, qu)){
-          enqueue(qu, charToInt(data));
+          if((!isEmpty(qu))&&(getQueueValue(qu)==0)){
+            if(data != '0'){
+              clearQueue(qu);
+              enqueue(qu, charToInt(data));
+            }
+          }
+          else{
+            enqueue(qu, charToInt(data));
+          }
           break; 
         }
       }
     }
 }
 
-void floatingMode(EEstack* st, queue* qu, char data){
+void floatingMode(FPstack* st, FPqueue* qu, char data){
   switch(data){
-    default: break;
+    case CLEAR:{
+      if(isEmpty(qu)&&!isEmpty(st)) {
+          pop(st);  
+        }  
+        //otherwise clear the button store
+        else{
+          clearQueue(qu);
+        }
+        break;
+    }
+    case ENTER:{
+      pushQueueToStack(qu, st);
+      break;
+    }
+    case FLOATING:{
+      calcMode=integer;
+      break;
+    }
+    default: {
+      if(charIsNumber(data)){
+        enqueue(qu, charToInt(data));
+      }
+      else if(data == '.'){
+        enqueue(qu, '.');
+      }
+      break; 
+    }
   }
 }
-
 //STACK operations
 //
 //STACK-primitives
@@ -366,6 +545,16 @@ long Peek(EEstack* st){
   return data;
 }
 
+ComplexFloat Peek(FPstack* st){
+  ComplexFloat data = floatingTopOfStack;
+  if(!isEmpty(st)){
+    EEPROM.get(st->topOfStack - sizeof(ComplexFloat), data);
+  }
+  
+  return data;
+}
+
+
 boolean push(EEstack* st, long data){
   if(st->topOfStack == EEPROM.length()){
     return false;
@@ -375,6 +564,20 @@ boolean push(EEstack* st, long data){
     st->topOfStack+=sizeof(long);
     //put the top of stack marker above the stack
     EEPROM.put(st->topOfStack, TOP_OF_STACK);
+    return true;
+  }
+}
+
+boolean push(FPstack* st, ComplexFloat data){
+  if(st->topOfStack == EEPROM.length()){
+    return false;
+  }
+  else{
+    data.top=false;
+    EEPROM.put(st->topOfStack, data);
+    st->topOfStack+=sizeof(ComplexFloat);
+    //put the top of stack marker above the stack
+    EEPROM.put(st->topOfStack, floatingTopOfStack);
     return true;
   }
 }
@@ -390,7 +593,27 @@ boolean pop(EEstack* st){
   }
 }
 
+boolean pop(FPstack* st){
+  if(st->topOfStack == 0){
+    return false;
+  }
+  else{
+    EEPROM.put(st->topOfStack, floatingTopOfStack);
+    st->topOfStack-=sizeof(ComplexFloat);
+    return true;
+  }
+}
+
 boolean isEmpty(EEstack* st){
+  if(st->topOfStack == 0){
+    return true;
+  }
+  else{
+    return false;
+  }
+}
+
+boolean isEmpty(FPstack* st){
   if(st->topOfStack == 0){
     return true;
   }
@@ -406,13 +629,32 @@ void intStack(EEstack* st)
   EEPROM.get(top, data);
   while(data != TOP_OF_STACK){
     top+=sizeof(long);
+    if(top == INT_STACK_MAX){
+      top = 0;
+      break;
+    }
     EEPROM.get(top, data);
   }
   st->displayFormat=decimal;
   st->topOfStack=top;  
 }
 
-
+void intStack(FPstack* st)
+{
+  int top = INT_STACK_MAX+sizeof(ComplexFloat);
+  ComplexFloat data;
+  EEPROM.get(top, data);
+  while(data.top != true){
+    top+=sizeof(ComplexFloat);
+    if(top == EEPROM.length()){
+      top = INT_STACK_MAX+sizeof(ComplexFloat);
+      break;
+    }
+    EEPROM.get(top, data);
+  }
+  st->displayFormat=binomial;
+  st->topOfStack=top;  
+}
 //STACK -Advanced
 
 void rollUp(EEstack* st, queue* qu){
@@ -755,6 +997,80 @@ void serialPrintStack(EEstack* st){
   }
 }
 
+void displayPrintStack(EEstack* st){
+  //position in the stack, start at the top
+  int pos=0, top = st->topOfStack-sizeof(long);
+  long temp;
+  
+  if(top >= 0){
+    //full stack shown for debugging purposes,but this code will be reused for the display
+    if(top >= (STACK_DISPLAY_HEIGHT)*sizeof(long)){
+      pos = top-(STACK_DISPLAY_HEIGHT-1)*sizeof(long);
+    }
+    if(top < (STACK_DISPLAY_HEIGHT)*sizeof(long)){
+      int i = STACK_DISPLAY_HEIGHT-1-top/sizeof(long);
+      for(i; i>0; i--){
+        display.print('\n');
+      }
+    }
+    while(pos <= top){
+      EEPROM.get(pos, temp);                      //get a number from the stack
+      display.print((((top-pos)/sizeof(long))+1));  //print the position in the stack 
+      display.print(": ");
+      if(st->displayFormat == hexadecimal){
+        display.print(temp,HEX);                   //print the value in hex
+      }
+      else if(st->displayFormat == octal){
+        display.print(temp,OCT);                   //print the value in oct
+      }
+      else if(st->displayFormat == binary){
+        display.print(temp,BIN);                   //print the value in binary
+      }
+      else{
+        display.print(temp);                       //print the value in decimal(default)
+      }
+      
+      display.print('\n');
+      //decrement position
+      pos += sizeof(long);
+    }
+  }
+  else {
+    display.print("\n\n\n\n");
+  }
+}
+
+void displayPrintStack(FPstack* st){
+  //position in the stack, start at the top
+  int pos=INT_STACK_MAX+sizeof(ComplexFloat), top = st->topOfStack-sizeof(ComplexFloat);
+  ComplexFloat temp;
+  
+  if(top >= INT_STACK_MAX+sizeof(ComplexFloat)){
+    if(top >= INT_STACK_MAX+sizeof(ComplexFloat)+(STACK_DISPLAY_HEIGHT)*sizeof(ComplexFloat)){
+      pos = top-(STACK_DISPLAY_HEIGHT-1)*sizeof(ComplexFloat);
+    }
+    else{
+      int i = STACK_DISPLAY_HEIGHT-(top-INT_STACK_MAX)/sizeof(ComplexFloat);
+      for(i; i>0; i--){
+        display.print('\n');
+      }
+    }
+    while(pos <= top){
+      EEPROM.get(pos, temp);                        //get a number from the stack
+      display.print((((top-pos)/sizeof(ComplexFloat))+1));  //print the position in the stack 
+      display.print(": ");
+      display.print(temp.real, temp.numDecimals);   //print the value in decimal(default)
+      
+      
+      display.print('\n');
+      //decrement position
+      pos += sizeof(ComplexFloat);
+    }
+  }
+  else {
+    display.print("\n\n\n\n");
+  }
+}
 //QUEUE 
 
 //QUEUE - Primitives 
@@ -763,6 +1079,13 @@ void intQueue(queue* qu){
   qu->front=0;              //set the front initially to 0
   qu->positive=true;        //intiially make it positive
   qu->entryFormat=decimal;  //intiially make it decimal
+}
+
+void intQueue(FPqueue* qu){
+  qu->size=0;               //set the size initially to 0
+  qu->front=0;              //set the front initially to 0
+  qu->positive=true;        //intiially make it positive
+  qu->decimal=NO_DECIMAL;
 }
 
 boolean isFull(queue* qu) {
@@ -774,7 +1097,27 @@ boolean isFull(queue* qu) {
   }
 }
 
+boolean isFull(FPqueue* qu) {
+  if(qu->size== MAX_QUEUE_SIZE){
+    return true;
+  }
+  else {
+    return false;
+  }
+}
+
+
 boolean isEmpty(queue* qu){
+  if(qu->size == 0){
+    return true;
+  }
+  else{
+    return false;
+  }
+}
+
+
+boolean isEmpty(FPqueue* qu){
   if(qu->size == 0){
     return true;
   }
@@ -793,6 +1136,21 @@ boolean enqueue(queue* qu, byte value){
      return true;
   }
 }
+
+boolean enqueue(FPqueue* qu, byte value){
+  if(isFull(qu)){
+    return false;  
+  }
+  else{
+    if(value == '.'){
+      qu->decimal=qu->size;  
+    }
+    qu->data[(qu->front + qu->size) % MAX_QUEUE_SIZE] = value; 
+    qu->size++;
+    return true;
+  }
+}
+
 boolean dequeue(queue* qu){
   if(isEmpty(qu)){
     return false;
@@ -805,9 +1163,29 @@ boolean dequeue(queue* qu){
   }
 }
 
+boolean dequeue(FPqueue* qu){
+  if(isEmpty(qu)){
+    return false;
+  }
+  else{
+    if(qu->data[qu->front] == '.'){
+      qu->decimal=NO_DECIMAL;
+    }
+    qu->data[qu->front] = -1;
+    qu->front = (qu->front+1) % MAX_QUEUE_SIZE;
+    qu->size--;
+    return true;
+  }
+}
+
 byte Peek(queue* qu){
   return qu->data[qu->front];
 }
+
+byte Peek(FPqueue* qu){
+  return qu->data[qu->front];
+}
+
 
 //QUEUE - Advanced
 //remove an item from the back of the queue
@@ -822,7 +1200,29 @@ boolean back(queue* qu){
   }
 }
 
+boolean back(FPqueue* qu){
+  if(isEmpty(qu)){
+    return false;
+  }
+  else{
+    if(qu->data[qu->front+ qu->size] == '.'){
+      qu->decimal=NO_DECIMAL;
+    }
+    qu->data[qu->front+ qu->size] = -1;   //remove the item from the back
+    qu->size--;                           //decrement teh size
+    return true;
+  }
+}
+
 void clearQueue(queue* qu){
+  //while qu still contains items, remove the item at the front
+  while(!isEmpty(qu)){
+    dequeue(qu);
+  }
+  qu->positive=true;
+}
+
+void clearQueue(FPqueue* qu){
   //while qu still contains items, remove the item at the front
   while(!isEmpty(qu)){
     dequeue(qu);
@@ -877,17 +1277,126 @@ void serialPrintQueue(queue* qu){
   }
 }
 
+
+
+
+void displayPrintQueue(queue* qu){ 
+  long temp = getQueueValue(qu);
+  //if there's no error just print the value in the queue
+  if(errorState == none){
+    if(!isEmpty(qu)){
+      if(qu->entryFormat == hexadecimal){
+        display.print(temp,HEX);           //print in hex
+        for(byte i = 0; i < (SCREEN_WIDTH-4-(qu->size)); i++){
+          display.print(" ");
+        }
+        display.print("H");
+      }
+      else if(qu->entryFormat == octal){
+        display.print(temp,OCT);           //print in oct
+        for(byte i = 0; i < (SCREEN_WIDTH-4-(qu->size)); i++){
+          display.print(" ");
+        }
+        display.print("O");
+      }
+      else if(qu->entryFormat == binary){
+        display.print(temp,BIN);           //print in binary
+        for(byte i = 0; i < (SCREEN_WIDTH-4-(qu->size)); i++){
+          display.print(" ");
+        }
+        display.print("B");
+      }
+      else{
+        display.print(temp);               //by default pint in decimal
+      }
+    }
+  }
+
+  ///otherwise print the error in place of the queue
+  else if(errorState == divideByZero){
+    display.print("Error: Divide0");
+  }
+  else if(errorState == overFlow){
+    display.print("Error: OverF");
+  }
+  else if(errorState == stack){
+    display.print("Error: Stack");
+  }
+  else if(errorState == doesNotExist){
+    display.print("Error: Func");  
+  }
+  display.drawBitmap(79,40, getBattery(), 5, 8, BLACK);
+}
+
+
+void displayPrintQueue(FPqueue* qu){ 
+  float temp = getQueueValue(qu);
+  //if there's no error just print the value in the queue
+  if(errorState == none){
+    if(!isEmpty(qu)){
+      display.print(temp,getNumDecimals(qu));               //by default pint in decimal
+    }
+  }
+  ///otherwise print the error in place of the queue
+  else if(errorState == divideByZero){
+    display.print("Error: Divide0");
+  }
+  else if(errorState == overFlow){
+    display.print("Error: OverF");
+  }
+  else if(errorState == stack){
+    display.print("Error: Stack");
+  }
+  else if(errorState == doesNotExist){
+    display.print("Error: Func");  
+  }
+  display.drawBitmap(79,40, getBattery(), 5, 8, BLACK);
+}
+
+byte getNumDecimals(FPqueue* qu){
+  if(qu->decimal != NO_DECIMAL){
+    return qu->size-qu->decimal-1;
+  }
+  return 0;
+}
+
 long getQueueValue(queue* qu){
   long temp = 0;
   byte pos = qu->front;
   byte qSize = qu->size;
-  //while we haven't reached the end of the q
+  //while we haven't reached the end of the q 
   while(qSize != 0){
     temp += (long)(qu->data[pos])*power(getBase(qu), qSize-1);
     //move the position by one
     pos = (pos+1)% MAX_QUEUE_SIZE;
     //decrement the size
     qSize--; 
+  }
+  if(!qu->positive){
+    temp=temp*-1;
+  }
+  return temp;
+}
+
+float getQueueValue(FPqueue* qu){
+  float temp = 0;
+  byte pos = qu->front;
+  char qSize = qu->size;
+  char qEnd = 0;
+  //while we haven't reached the end of the q
+  if(qu->decimal != NO_DECIMAL){
+    qEnd=(char)qu->decimal-(char)qSize+1;
+    qSize+=qEnd-1;
+  }
+  while(qSize != qEnd){
+    if(qu->data[pos] != '.'){
+      temp += (float)(qu->data[pos])*pow(10.0, (float)qSize-1);
+      qSize--; 
+    }
+    //move the position by one
+    pos = (pos+1)% MAX_QUEUE_SIZE;
+    //decrement the size
+    
   }
   if(!qu->positive){
     temp=temp*-1;
@@ -935,6 +1444,25 @@ void pushQueueToStack(queue* qu, EEstack* st){
   qu->positive=true;
 }
 
+void pushQueueToStack(FPqueue* qu, FPstack* st){
+  float temp = 0;
+  ComplexFloat CF;
+  //while qu still contains items
+  temp = getQueueValue(qu);
+  //if the number is negative, multiply by -1 before pushing
+  if(!qu->positive){
+    temp=temp*-1;
+  }
+
+  CF.real=temp;
+  CF.imaginary=0.0;
+  CF.numDecimals=getNumDecimals(qu);
+  
+  push(st, CF);
+  clearQueue(qu);
+  qu->positive=true;
+}
+
 //OVERFLOW DETECTION
 boolean addOverflow(long x, long y){
   if ((y > 0 && x > INT_MAX - y) || (y < 0 && x < INT_MIN - y)){
@@ -962,6 +1490,23 @@ void updateSerial(queue* qu, EEstack* st){
     serialPrintQueue(qu);
 }
 
+void updateDisplay(queue* qu, EEstack* st){
+    display.clearDisplay();
+    display.setCursor(0,0);
+    displayPrintStack(st);
+    displayPrintLine();
+    displayPrintQueue(qu);
+    display.display();
+}
+
+void updateDisplay(FPqueue* qu, FPstack* st){
+    display.clearDisplay();
+    display.setCursor(0,0);
+    displayPrintStack(st);
+    displayPrintLine();
+    displayPrintQueue(qu);
+    display.display();
+}
 //prints a line in serial monitor
 void serialPrintLine(){
   byte i;
@@ -969,6 +1514,14 @@ void serialPrintLine(){
     Serial.print("-");
   }
   Serial.print("\n");
+}
+
+void displayPrintLine(){
+  byte i;
+  for(i=0; i<SCREEN_WIDTH; i++){
+    display.print("-");
+  }
+  display.print("\n");
 }
 
 //returns the base to the power of the exponent
@@ -1038,6 +1591,13 @@ boolean charIsNumber(char data, queue* qu){
   }
   return isNum;
 }
+boolean charIsNumber(char data){
+  boolean isNum;
+  //switch the entry format
+  isNum = (data >= '0' && data <='9');    //if between 0 and 9 for hexadecimal
+  return isNum;
+}
+
 
 void serialPrintCatalogue(queue* qu){
   byte i, funcNum;
@@ -1063,6 +1623,29 @@ void serialPrintCatalogue(queue* qu){
   serialPrintQueue(qu);
 }
 
+void displayPrintCatalogue(queue* qu){
+  byte i, funcNum;
+  
+  display.clearDisplay();
+  //print the names and numbers of all the functions
+  for(i=STACK_DISPLAY_HEIGHT; i>0; i--){
+    funcNum = i+(STACK_DISPLAY_HEIGHT*rowLevel);
+    //print the function number
+    if(funcNum <= NUM_FUNCTIONS){
+      display.print(funcNum); 
+      display.print(": ");
+      //print the function name
+      display.print(functionNames[funcNum-1]);
+    }
+    display.print('\n');
+  }
+
+  //print the line followed by the value in the queue
+  displayPrintLine();
+  displayPrintQueue(qu);
+  display.display();
+}
+
 void resetError(EEstack* st, queue* qu){
   unsigned long time = millis();    //save the current time
   if(errorState != none){           //if there is an error
@@ -1074,7 +1657,7 @@ void resetError(EEstack* st, queue* qu){
     else if(time-timeSinceError >= ERROR_TIMEOUT){
       errorState = none;            //reset the error
       timerSet = false;             //reset the timer flag
-      updateSerial(qu, st);         //update the screen
+      updateDisplay(qu, st);         //update the screen
     }
   }
 }
@@ -1143,4 +1726,18 @@ boolean callFunction(byte funcNum, EEstack * st){
     }
   }
   return success;
+}
+const uint8_t* getBattery(){
+  if(analogRead(A7) < 547){
+    return EMPTY_BATTERY;
+  }
+  else if(analogRead(A7) < 582){
+    return QUARTER_BATTERY;
+  }
+  else if(analogRead(A7) < 618){
+    return QUARTER_BATTERY;
+  }
+  else{
+    return FULL_BATTERY;
+  }
 }
