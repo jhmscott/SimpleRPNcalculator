@@ -31,6 +31,9 @@
 #define HEXADECIMAL           'H'
 #define FLOATING              'F'
 #define ADV_FUNC              'A'
+#define SIN                   '&'
+#define COS                   '|'
+#define TAN                   '~'
 
 #define NUMFLAKES 10
 #define XPOS 0
@@ -429,7 +432,7 @@ void integerMode(EEstack* st, queue* qu, char data){
           push(st, temp*-1);
         }
         else{
-          buttonStore.positive=!buttonStore.positive;
+          qu->positive=!qu->positive;
         }
         break;
       }
@@ -514,19 +517,60 @@ void floatingMode(FPstack* st, FPqueue* qu, char data){
         }
         break;
     }
-    case ENTER:{
-      pushQueueToStack(qu, st);
+    case ENTER: {
+      if(!isEmpty(qu)){
+        pushQueueToStack(qu, st);
+      }
+      else if(!isEmpty(st)){
+        copy(st);
+      }
       break;
     }
     case FLOATING:{
       calcMode=integer;
       break;
     }
+    case BACK_SPACE:{
+      if(!back(qu)){
+        pop(st); 
+      }
+      break;
+    }
+    case NEGATIVE:{
+      if(isEmpty(qu)&&!isEmpty(st)){
+        ComplexFloat temp = Peek(st);
+        pop(st);
+        temp.real = temp.real*-1.0;
+        push(st, temp);
+      }
+      else{
+        qu->positive=!qu->positive;
+      }
+      break;
+    }
+    case '+':{
+      if(!add(st, qu)){
+        errorState = stack;
+      }
+      break;
+    }
+    case '-':{
+      if(!sub(st, qu)){
+        errorState = stack;
+      }
+      break;
+    }
+    case SIN:{
+      if(!RPNsin(st, qu)){
+        errorState = stack; 
+      }
+      break;
+    }
     default: {
       if(charIsNumber(data)){
         enqueue(qu, charToInt(data));
       }
-      else if(data == '.'){
+      else if(data == '.'&&qu->decimal == NO_DECIMAL){
         enqueue(qu, '.');
       }
       break; 
@@ -686,6 +730,11 @@ void copy(EEstack* st){
   push(st, temp);
 }
 
+void copy(FPstack* st){
+  ComplexFloat temp = Peek(st);
+  push(st, temp);
+}
+
 //STACK - Arithmetic
 boolean add(EEstack* st, queue* qu){
   long num1, num2;
@@ -721,6 +770,50 @@ boolean add(EEstack* st, queue* qu){
   return true;
 }
 
+boolean add(FPstack* st, FPqueue* qu){
+  ComplexFloat num1, num2, result;
+  float real, imaginary;
+  if(isEmpty(qu)){
+    num1 = Peek(st);
+    //if you can't pop the stack, then the stack is empty, 
+    //so you can complete the operation
+    if(!pop(st)){
+      return false;
+    }
+  }
+  else{
+    num1.real = getQueueValue(qu);
+    num1.imaginary = 0.0;
+    num1.numDecimals=getNumDecimals(qu);
+    clearQueue(qu);
+  }
+  num2 = Peek(st);
+  
+  //if you can't pop the stack, then the stack is empty, 
+  //so you can complete the operation
+  if(!pop(st)){
+    num1.top=false;
+    push(st, num1);
+    return false;
+  }
+
+  real=num1.real+num2.real;
+  imaginary=num1.imaginary+num2.imaginary;
+  result.real=real;
+  result.imaginary=imaginary;
+  result.top=false;
+
+  if(num1.numDecimals >= num2.numDecimals){
+    result.numDecimals=num1.numDecimals;
+  }
+  else{
+    result.numDecimals=num2.numDecimals;
+  }
+  
+  push(st, result);
+  return true;
+}
+
 boolean sub(EEstack* st, queue* qu){
   long num1, num2;
   if(isEmpty(qu)){
@@ -750,6 +843,49 @@ boolean sub(EEstack* st, queue* qu){
     return true;
   }
   push(st, num2-num1); 
+  return true;
+}
+
+boolean sub(FPstack* st, FPqueue* qu){
+  ComplexFloat num1, num2, result;
+  float real, imaginary;
+  if(isEmpty(qu)){
+    num1 = Peek(st);
+    //if you can't pop the stack, then the stack is empty, 
+    //so you can complete the operation
+    if(!pop(st)){
+      return false;
+    }
+  }
+  else{
+    num1.real = getQueueValue(qu);
+    num1.imaginary = 0.0;
+    num1.numDecimals = getNumDecimals(qu);
+    clearQueue(qu);
+  }
+  num2 = Peek(st);
+  //if you can't pop the stack, then the stack is empty, 
+  //so you can complete the operation
+  if(!pop(st)){
+    num1.top = false;
+    push(st, num1);
+    return false;
+  }
+
+  real = num2.real - num1.real;
+  imaginary = num2.imaginary - num1.imaginary;
+  result.real=real;
+  result.imaginary=imaginary;
+  result.top=false;
+
+  if(num1.numDecimals >= num2.numDecimals){
+    result.numDecimals=num1.numDecimals;
+  }
+  else{
+    result.numDecimals=num2.numDecimals;
+  }
+  
+  push(st, result); 
   return true;
 }
 
@@ -884,6 +1020,28 @@ boolean logicNot(EEstack* st, queue* qu){
   }
 
   push(st, ~num1);
+  return true;  
+}
+
+boolean RPNsin(FPstack* st, FPqueue* qu){
+  ComplexFloat num1, result;
+  if(isEmpty(qu)){
+    num1 = Peek(st);
+    //if you can't pop the stack, then the stack is empty, 
+    //so you can complete the operation
+    if(!pop(st)){
+      return false;
+    }
+  }
+  else{
+    num1.real = getQueueValue(qu);
+    clearQueue(qu);
+  }
+  result.real=sin(num1.real);
+  result.imaginary=0.0;
+  result.numDecimals=num1.numDecimals;
+
+  push(st, result);
   return true;  
 }
 
@@ -1449,10 +1607,6 @@ void pushQueueToStack(FPqueue* qu, FPstack* st){
   ComplexFloat CF;
   //while qu still contains items
   temp = getQueueValue(qu);
-  //if the number is negative, multiply by -1 before pushing
-  if(!qu->positive){
-    temp=temp*-1;
-  }
 
   CF.real=temp;
   CF.imaginary=0.0;
