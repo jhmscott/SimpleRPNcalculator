@@ -34,6 +34,7 @@
 #define SIN                   '&'
 #define COS                   '|'
 #define TAN                   '~'
+#define PUSH_PI               OCTAL
 
 #define NUMFLAKES 10
 #define XPOS 0
@@ -560,8 +561,40 @@ void floatingMode(FPstack* st, FPqueue* qu, char data){
       }
       break;
     }
+    case '*':{
+      if(!mul(st, qu)){
+        errorState = stack;
+      }
+      break;
+    }
+    case '/':{
+      if(!dvd(st, qu)){
+        errorState = stack;
+      }
+      break;
+    }
+    case PUSH_PI:{
+      ComplexFloat temp;
+      temp.real = 3.14159;
+      temp.imaginary = 0.0;
+      temp.top = false;
+      temp.numDecimals = 4;
+      push(st, temp);
+    }
     case SIN:{
       if(!RPNsin(st, qu)){
+        errorState = stack; 
+      }
+      break;
+    }
+    case COS:{
+      if(!RPNcos(st, qu)){
+        errorState = stack; 
+      }
+      break;
+    }
+    case TAN:{
+      if(!RPNtan(st, qu)){
         errorState = stack; 
       }
       break;
@@ -921,6 +954,44 @@ boolean mul(EEstack* st, queue* qu){
   return true;   
 }
 
+boolean mul(FPstack* st, FPqueue* qu){
+  ComplexFloat num1, num2, result;
+  
+  
+  if(isEmpty(qu)){
+    num1 = Peek(st);
+    //if you can't pop the stack, then the stack is empty, 
+    //so you can complete the operation
+    if(!pop(st)){
+      return false;
+    }
+  }
+  else{
+    num1.real = getQueueValue(qu);
+    num1.imaginary = 0.0;
+    num1.numDecimals = getNumDecimals(qu);
+    clearQueue(qu);
+  }
+  num2 = Peek(st);
+  //if you can't pop the stack, then the stack is empty, 
+  //so you can complete the operation
+  if(!pop(st)){
+    num1.top = false;
+    push(st, num1);
+    return false;
+  }
+  result.real = num1.real*num2.real;
+  if(num1.numDecimals >= num2.numDecimals){
+    result.numDecimals=num1.numDecimals;
+  }
+  else{
+    result.numDecimals=num2.numDecimals;
+  }
+  
+  push(st, result); 
+  return true;   
+}
+
 boolean dvd(EEstack* st, queue* qu){
   long num1, num2;
   if(isEmpty(qu)){
@@ -950,6 +1021,51 @@ boolean dvd(EEstack* st, queue* qu){
   }
   else{
     push(st, num2/num1);;  
+  }
+  return true;
+}
+
+boolean dvd(FPstack* st, FPqueue* qu){
+  ComplexFloat num1, num2, result;
+  if(isEmpty(qu)){
+    num1 = Peek(st);
+    //if you can't pop the stack, then the stack is empty, 
+    //so you can complete the operation
+    if(!pop(st)){
+      return false;
+    }
+  }
+  else{
+    num1.real = getQueueValue(qu);
+    num1.numDecimals = getNumDecimals(qu);
+    num1.imaginary = 0;
+    clearQueue(qu);
+  }
+  num2 = Peek(st);
+  //if you can't pop the stack, then the stack is empty, 
+  //so you can complete the operation
+  if(!pop(st)){
+    num1.top=false;
+    push(st, num1);
+    return false;
+  }
+  if(num1.real == 0.0){
+    errorState=divideByZero;
+    push(st, num2);
+    push(st, num1);
+    
+  }
+  else{
+    result.real = num2.real/num1.real;
+    result.imaginary = 0.0;
+    result.top=false;
+    if(num1.numDecimals >= num2.numDecimals){
+      result.numDecimals=num1.numDecimals;
+    }
+    else{
+      result.numDecimals=num2.numDecimals;
+    }
+    push(st, result); 
   }
   return true;
 }
@@ -1038,6 +1154,50 @@ boolean RPNsin(FPstack* st, FPqueue* qu){
     clearQueue(qu);
   }
   result.real=sin(num1.real);
+  result.imaginary=0.0;
+  result.numDecimals=num1.numDecimals;
+
+  push(st, result);
+  return true;  
+}
+
+boolean RPNcos(FPstack* st, FPqueue* qu){
+  ComplexFloat num1, result;
+  if(isEmpty(qu)){
+    num1 = Peek(st);
+    //if you can't pop the stack, then the stack is empty, 
+    //so you can complete the operation
+    if(!pop(st)){
+      return false;
+    }
+  }
+  else{
+    num1.real = getQueueValue(qu);
+    clearQueue(qu);
+  }
+  result.real=cos(num1.real);
+  result.imaginary=0.0;
+  result.numDecimals=num1.numDecimals;
+
+  push(st, result);
+  return true;  
+}
+
+boolean RPNtan(FPstack* st, FPqueue* qu){
+  ComplexFloat num1, result;
+  if(isEmpty(qu)){
+    num1 = Peek(st);
+    //if you can't pop the stack, then the stack is empty, 
+    //so you can complete the operation
+    if(!pop(st)){
+      return false;
+    }
+  }
+  else{
+    num1.real = getQueueValue(qu);
+    clearQueue(qu);
+  }
+  result.real=tan(num1.real);
   result.imaginary=0.0;
   result.numDecimals=num1.numDecimals;
 
@@ -1386,6 +1546,7 @@ void clearQueue(FPqueue* qu){
     dequeue(qu);
   }
   qu->positive=true;
+  qu->decimal=NO_DECIMAL;
 }
 
 //QUEUE - Customs
