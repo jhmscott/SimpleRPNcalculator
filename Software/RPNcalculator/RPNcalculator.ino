@@ -18,6 +18,7 @@
 #define ROWS                  6 //four rows
 #define COLS                  5 //four columns
 #define ERROR_TIMEOUT         1000
+#define NUM_DIGITS_PI         4
 
 #define ROLL_UP               'U'
 #define ROLL_DOWN             'D'
@@ -35,6 +36,7 @@
 #define COS                   '|'
 #define TAN                   '~'
 #define PUSH_PI               OCTAL
+#define CHANGE_ANGLE          BINARY
 
 #define NUMFLAKES 10
 #define XPOS 0
@@ -70,6 +72,12 @@ enum complexFormat{
   rectangular,
   binomial,
   ECEbinomial
+};
+
+enum angleMode{
+  degrees,
+  radians,
+  gradians
 };
 
 struct ComplexFloat{
@@ -221,6 +229,7 @@ char          keyPress;
 byte          rowLevel;
 unsigned long timeSinceError;
 boolean       timerSet; 
+angleMode     angle;
 
 void setup() {
   pinMode(13, OUTPUT);
@@ -239,6 +248,7 @@ void setup() {
   errorState=none;
   timerSet=false;
   rowLevel=0;
+  angle=degrees;
   
   display.begin();
   display.setContrast(60);
@@ -574,12 +584,13 @@ void floatingMode(FPstack* st, FPqueue* qu, char data){
       break;
     }
     case PUSH_PI:{
-      ComplexFloat temp;
-      temp.real = 3.14159;
-      temp.imaginary = 0.0;
-      temp.top = false;
-      temp.numDecimals = 4;
-      push(st, temp);
+      ComplexFloat tempToPush;
+      tempToPush.real = PI;
+      tempToPush.imaginary = 0.0;
+      tempToPush.top = false;
+      tempToPush.numDecimals = NUM_DIGITS_PI;
+      push(st, tempToPush);
+      break;
     }
     case SIN:{
       if(!RPNsin(st, qu)){
@@ -596,6 +607,15 @@ void floatingMode(FPstack* st, FPqueue* qu, char data){
     case TAN:{
       if(!RPNtan(st, qu)){
         errorState = stack; 
+      }
+      break;
+    }
+    case CHANGE_ANGLE:{
+      if(angle == degrees){
+        angle = radians;
+      }
+      else{
+        angle = degrees;
       }
       break;
     }
@@ -1153,7 +1173,13 @@ boolean RPNsin(FPstack* st, FPqueue* qu){
     num1.real = getQueueValue(qu);
     clearQueue(qu);
   }
-  result.real=sin(num1.real);
+  if(angle == degrees){
+    result.real=sin(2.0*PI*num1.real/360.0);
+  }
+  else{
+    result.real=sin(num1.real);
+  }
+  
   result.imaginary=0.0;
   result.numDecimals=num1.numDecimals;
 
@@ -1175,7 +1201,13 @@ boolean RPNcos(FPstack* st, FPqueue* qu){
     num1.real = getQueueValue(qu);
     clearQueue(qu);
   }
-  result.real=cos(num1.real);
+
+  if(angle == degrees){
+    result.real=cos(2.0*PI*num1.real/360.0);
+  }
+  else{
+    result.real=cos(num1.real);
+  }
   result.imaginary=0.0;
   result.numDecimals=num1.numDecimals;
 
@@ -1197,6 +1229,13 @@ boolean RPNtan(FPstack* st, FPqueue* qu){
     num1.real = getQueueValue(qu);
     clearQueue(qu);
   }
+  if(angle == degrees){
+    result.real=tan(2.0*PI*num1.real/360.0);
+  }
+  else{
+    result.real=tan(num1.real);
+  }
+  
   result.real=tan(num1.real);
   result.imaginary=0.0;
   result.numDecimals=num1.numDecimals;
