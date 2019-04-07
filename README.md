@@ -10,4 +10,4 @@ This projects relies on the following libraries:
 2. The Adafruit GFX library v1.4.8 - by Limor Fried - found here: https://github.com/adafruit/Adafruit-GFX-Library
 3. the Adafruit PCD8544 Library v1.0.0 - by Limor Fried - found here: https://github.com/adafruit/Adafruit-PCD8544-Nokia-5110-LCD-library
 
-Additionally I used the builitn Arduion SPI and EEPROM libraries
+Additionally I used the builitn Arduino SPI and EEPROM libraries
