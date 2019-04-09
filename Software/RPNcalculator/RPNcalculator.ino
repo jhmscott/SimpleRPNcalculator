@@ -679,7 +679,7 @@ ComplexFloat Peek(FPstack* st){
 
 
 boolean push(EEstack* st, long data){
-  if(st->topOfStack == EEPROM.length()){
+  if(st->topOfStack == INT_STACK_MAX){
     return false;
   }
   else{
@@ -717,7 +717,7 @@ boolean pop(EEstack* st){
 }
 
 boolean pop(FPstack* st){
-  if(st->topOfStack == 0){
+  if(st->topOfStack == INT_STACK_MAX+sizeof(ComplexFloat)){
     return false;
   }
   else{
@@ -737,7 +737,7 @@ boolean isEmpty(EEstack* st){
 }
 
 boolean isEmpty(FPstack* st){
-  if(st->topOfStack == 0){
+  if(st->topOfStack == INT_STACK_MAX+sizeof(ComplexFloat)){
     return true;
   }
   else{
