@@ -38,14 +38,18 @@
 #define PUSH_PI               OCTAL
 #define CHANGE_ANGLE          BINARY
 
-#define NUMFLAKES 10
-#define XPOS 0
-#define YPOS 1
-#define DELTAY 2
+#define NUMFLAKES             10
+#define XPOS                  0
+#define YPOS                  1
+#define DELTAY                2
 
-#define LOGO16_GLCD_HEIGHT 16
-#define LOGO16_GLCD_WIDTH  16
+#define LOGO16_GLCD_HEIGHT    16
+#define LOGO16_GLCD_WIDTH     16
 
+#define BATTERY_HEIGHT        8
+#define BATTERY_WIDTH         5
+#define ANGLE_SYMBOL_HEIGHT   8
+#define ANGLE_SYMBOL_WIDTH    8
 enum numberBase{
   binary,
   octal,
@@ -184,6 +188,28 @@ static const uint8_t PROGMEM FULL_BATTERY[] = {
   B01110000,
   B01110000,
   B01110000,
+  B00000000
+};
+
+static const uint8_t PROGMEM RADIANS_SYMBOL[] = { 
+  B00001110,
+  B00001010,
+  B00001010,
+  B00010000,
+  B00100000,
+  B01000000,
+  B11111000,
+  B00000000
+};
+
+static const uint8_t PROGMEM DEGREES_SYMBOL[] = { 
+  B00001110,
+  B00001010,
+  B00001110,
+  B00010000,
+  B00100000,
+  B01000000,
+  B11111000,
   B00000000
 };
 char keys[ROWS][COLS] = {
@@ -1683,7 +1709,8 @@ void displayPrintQueue(queue* qu){
   else if(errorState == doesNotExist){
     display.print("Error: Func");  
   }
-  display.drawBitmap(79,40, getBattery(), 5, 8, BLACK);
+  
+  display.drawBitmap(79,40, getBattery(), BATTERY_WIDTH, BATTERY_HEIGHT, BLACK);
 }
 
 
@@ -1708,7 +1735,8 @@ void displayPrintQueue(FPqueue* qu){
   else if(errorState == doesNotExist){
     display.print("Error: Func");  
   }
-  display.drawBitmap(79,40, getBattery(), 5, 8, BLACK);
+  display.drawBitmap(71,40, getAngleMode(), ANGLE_SYMBOL_WIDTH, ANGLE_SYMBOL_HEIGHT, BLACK);
+  display.drawBitmap(79,40, getBattery(), BATTERY_WIDTH, BATTERY_HEIGHT, BLACK);
 }
 
 byte getNumDecimals(FPqueue* qu){
@@ -2093,5 +2121,22 @@ const uint8_t* getBattery(){
   }
   else{
     return FULL_BATTERY;
+  }
+}
+
+const uint8_t* getAngleMode(){
+  switch(angle){
+    case radians:{
+      return RADIANS_SYMBOL;
+      break;
+    }
+    case degrees:{
+      return DEGREES_SYMBOL;
+      break;
+    }
+    default:{
+      return NULL;
+      break;
+    }
   }
 }
