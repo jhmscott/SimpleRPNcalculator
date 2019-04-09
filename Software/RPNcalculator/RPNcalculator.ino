@@ -659,6 +659,9 @@ void floatingMode(FPstack* st, FPqueue* qu, char data){
     }
     case COMPLEX_MODE:{
       if(st->displayFormat == binomial){
+        st->displayFormat = ECEbinomial;
+      }
+      else if(st->displayFormat == ECEbinomial){
         st->displayFormat = polar;
       }
       else{
@@ -1463,20 +1466,20 @@ void displayPrintStack(FPstack* st){
       EEPROM.get(pos, temp);                        //get a number from the stack
       display.print((((top-pos)/sizeof(ComplexFloat))+1));  //print the position in the stack 
       display.print(": ");
-      if(st->displayFormat == binomial){
+      if(st->displayFormat == binomial || st->displayFormat == ECEbinomial){
         if(onlyReal(temp)){
           display.print(temp.real, temp.numDecimals);   //print the value in decimal(default)
         }
         else if(onlyImaginary(temp)){
           display.print(temp.imaginary, temp.numDecimals);   //print the value in decimal(default)
-          display.print("i");
+          display.print(imaginaryUnit(st));
         }
         //temp has a real and imaginary component
         else{
           display.print(temp.real, temp.numDecimals);
           display.print("+");
           display.print(temp.imaginary, temp.numDecimals);
-          display.print("i");
+          display.print(imaginaryUnit(st));
         }
       }
       else{
@@ -1763,7 +1766,7 @@ void displayPrintQueue(FPqueue* qu){
     if(!isEmpty(qu)){
       display.print(temp,getNumDecimals(qu));               //by default print in decimal
       if(!qu->real){
-        display.print("i");
+        display.print(imaginaryUnit(&FLTstack));
       }
     }
   }
@@ -2224,5 +2227,14 @@ float argument(ComplexFloat num){
   }
   else{
     return (360/(2*PI))*atan(num.imaginary/num.real);
+  }
+}
+
+char imaginaryUnit(FPstack* st){
+  if(st->displayFormat == ECEbinomial){
+    return 'j';
+  }
+  else{
+    return 'i';
   }
 }
