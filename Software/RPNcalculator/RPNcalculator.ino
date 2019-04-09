@@ -37,11 +37,7 @@
 #define TAN                   '~'
 #define PUSH_PI               OCTAL
 #define CHANGE_ANGLE          BINARY
-
-#define NUMFLAKES             10
-#define XPOS                  0
-#define YPOS                  1
-#define DELTAY                2
+#define IMAGINARY             DECIMAL
 
 #define LOGO16_GLCD_HEIGHT    16
 #define LOGO16_GLCD_WIDTH     16
@@ -50,6 +46,7 @@
 #define BATTERY_WIDTH         5
 #define ANGLE_SYMBOL_HEIGHT   8
 #define ANGLE_SYMBOL_WIDTH    8
+
 enum numberBase{
   binary,
   octal,
@@ -114,6 +111,7 @@ struct FPqueue{
   byte        size;
   byte        front;
   boolean     positive;
+  boolean     real;
   byte        decimal;
 };
 
@@ -350,6 +348,7 @@ void functionMode(EEstack* st, queue*qu, char data){
       if(!isEmpty(qu)) {
         clearQueue(qu);
       }
+      //otherwise return to the previous mode
       else{
         calcMode = prevMode;
       }
@@ -357,16 +356,19 @@ void functionMode(EEstack* st, queue*qu, char data){
     }
     
     case BACK_SPACE:{
+      //back space the queue
       back(qu);
       break;
     }
     case ROLL_UP:{
+      //navigate through the menu
       if(rowLevel < NUM_FUNCTIONS/STACK_DISPLAY_HEIGHT){
         rowLevel++;
       }
       break;
     }
     case ROLL_DOWN:{
+      //navigate through the menu
       if(rowLevel > 0){
         rowLevel--;
       }
@@ -374,13 +376,16 @@ void functionMode(EEstack* st, queue*qu, char data){
     case ENTER:{
       if(!isEmpty(qu)) {
         long qValue = getQueueValue(qu);
+        //check if qvalue is in the range of functions
         if(qValue <= NUM_FUNCTIONS && qValue > 0){
+          //call the funtion and if it returns false, then there was a stack erros
           if(!callFunction((byte)qValue, st)){
             errorState =  stack;
           }
           calcMode = prevMode;
           clearQueue(qu);
         }
+        //if it's outside the range, set an error code
         else {
           errorState = doesNotExist;
           calcMode = prevMode;
@@ -610,11 +615,13 @@ void floatingMode(FPstack* st, FPqueue* qu, char data){
       break;
     }
     case PUSH_PI:{
+      //create a Complex float with real value pi
       ComplexFloat tempToPush;
       tempToPush.real = PI;
       tempToPush.imaginary = 0.0;
       tempToPush.top = false;
       tempToPush.numDecimals = NUM_DIGITS_PI;
+      //push it to the stack
       push(st, tempToPush);
       break;
     }
@@ -643,6 +650,10 @@ void floatingMode(FPstack* st, FPqueue* qu, char data){
       else{
         angle = degrees;
       }
+      break;
+    }
+    case IMAGINARY:{
+      qu->real=!(qu->real);
       break;
     }
     default: {
@@ -1442,9 +1453,20 @@ void displayPrintStack(FPstack* st){
       EEPROM.get(pos, temp);                        //get a number from the stack
       display.print((((top-pos)/sizeof(ComplexFloat))+1));  //print the position in the stack 
       display.print(": ");
-      display.print(temp.real, temp.numDecimals);   //print the value in decimal(default)
-      
-      
+      if(onlyReal(temp)){
+        display.print(temp.real, temp.numDecimals);   //print the value in decimal(default)
+      }
+      else if(onlyImaginary(temp)){
+        display.print(temp.imaginary, temp.numDecimals);   //print the value in decimal(default)
+        display.print("i");
+      }
+      //temp has a real and imaginary component
+      else{
+        display.print(temp.real, temp.numDecimals);
+        display.print("+");
+        display.print(temp.imaginary, temp.numDecimals);
+        display.print("i");
+      }
       display.print('\n');
       //decrement position
       pos += sizeof(ComplexFloat);
@@ -1468,6 +1490,7 @@ void intQueue(FPqueue* qu){
   qu->size=0;               //set the size initially to 0
   qu->front=0;              //set the front initially to 0
   qu->positive=true;        //intiially make it positive
+  qu->real=true;
   qu->decimal=NO_DECIMAL;
 }
 
@@ -1611,6 +1634,7 @@ void clearQueue(FPqueue* qu){
     dequeue(qu);
   }
   qu->positive=true;
+  qu->real=true;
   qu->decimal=NO_DECIMAL;
 }
 
@@ -1719,7 +1743,10 @@ void displayPrintQueue(FPqueue* qu){
   //if there's no error just print the value in the queue
   if(errorState == none){
     if(!isEmpty(qu)){
-      display.print(temp,getNumDecimals(qu));               //by default pint in decimal
+      display.print(temp,getNumDecimals(qu));               //by default print in decimal
+      if(!qu->real){
+        display.print("i");
+      }
     }
   }
   ///otherwise print the error in place of the queue
@@ -1836,8 +1863,15 @@ void pushQueueToStack(FPqueue* qu, FPstack* st){
   //while qu still contains items
   temp = getQueueValue(qu);
 
-  CF.real=temp;
-  CF.imaginary=0.0;
+  if(qu->real){
+    CF.real=temp;
+    CF.imaginary=0.0;
+  }
+  else{
+    CF.real=0.0;
+    CF.imaginary=temp;
+  }
+  
   CF.numDecimals=getNumDecimals(qu);
   
   push(st, CF);
@@ -2125,6 +2159,7 @@ const uint8_t* getBattery(){
 }
 
 const uint8_t* getAngleMode(){
+  //switch the angle mode and return a pointer to  the symbol
   switch(angle){
     case radians:{
       return RADIANS_SYMBOL;
@@ -2138,5 +2173,24 @@ const uint8_t* getAngleMode(){
       return NULL;
       break;
     }
+  }
+}
+
+
+boolean onlyReal(ComplexFloat num){
+  if(num.imaginary==0.0){
+    return true;
+  }
+  else{
+    return false;
+  }
+}
+
+boolean onlyImaginary(ComplexFloat num){
+  if(num.real == 0.0){
+    return true;
+  }
+  else{
+    return false;
   }
 }
