@@ -38,6 +38,7 @@
 #define PUSH_PI               OCTAL
 #define CHANGE_ANGLE          BINARY
 #define IMAGINARY             DECIMAL
+#define COMPLEX_MODE          HEXADECIMAL
 
 #define LOGO16_GLCD_HEIGHT    16
 #define LOGO16_GLCD_WIDTH     16
@@ -654,6 +655,15 @@ void floatingMode(FPstack* st, FPqueue* qu, char data){
     }
     case IMAGINARY:{
       qu->real=!(qu->real);
+      break;
+    }
+    case COMPLEX_MODE:{
+      if(st->displayFormat == binomial){
+        st->displayFormat = polar;
+      }
+      else{
+        st->displayFormat = binomial;
+      }
       break;
     }
     default: {
@@ -1453,20 +1463,28 @@ void displayPrintStack(FPstack* st){
       EEPROM.get(pos, temp);                        //get a number from the stack
       display.print((((top-pos)/sizeof(ComplexFloat))+1));  //print the position in the stack 
       display.print(": ");
-      if(onlyReal(temp)){
-        display.print(temp.real, temp.numDecimals);   //print the value in decimal(default)
+      if(st->displayFormat == binomial){
+        if(onlyReal(temp)){
+          display.print(temp.real, temp.numDecimals);   //print the value in decimal(default)
+        }
+        else if(onlyImaginary(temp)){
+          display.print(temp.imaginary, temp.numDecimals);   //print the value in decimal(default)
+          display.print("i");
+        }
+        //temp has a real and imaginary component
+        else{
+          display.print(temp.real, temp.numDecimals);
+          display.print("+");
+          display.print(temp.imaginary, temp.numDecimals);
+          display.print("i");
+        }
       }
-      else if(onlyImaginary(temp)){
-        display.print(temp.imaginary, temp.numDecimals);   //print the value in decimal(default)
-        display.print("i");
-      }
-      //temp has a real and imaginary component
       else{
-        display.print(temp.real, temp.numDecimals);
-        display.print("+");
-        display.print(temp.imaginary, temp.numDecimals);
-        display.print("i");
+        display.print(magnitude(temp), temp.numDecimals);
+        display.print("<");
+        display.print(argument(temp), 1);
       }
+      
       display.print('\n');
       //decrement position
       pos += sizeof(ComplexFloat);
@@ -2176,6 +2194,7 @@ const uint8_t* getAngleMode(){
   }
 }
 
+//complex number operations
 
 boolean onlyReal(ComplexFloat num){
   if(num.imaginary==0.0){
@@ -2192,5 +2211,18 @@ boolean onlyImaginary(ComplexFloat num){
   }
   else{
     return false;
+  }
+}
+
+float magnitude(ComplexFloat num){
+  return sqrt(num.real*num.real+num.imaginary*num.imaginary);
+}
+
+float argument(ComplexFloat num){
+  if(angle == radians){
+    return atan(num.imaginary/num.real);
+  }
+  else{
+    return (360/(2*PI))*atan(num.imaginary/num.real);
   }
 }
