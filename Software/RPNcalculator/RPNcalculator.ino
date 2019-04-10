@@ -211,6 +211,19 @@ static const uint8_t PROGMEM DEGREES_SYMBOL[] = {
   B11111000,
   B00000000
 };
+
+
+static const uint8_t PROGMEM GRADIANS_SYMBOL[] = { 
+  B00001110,
+  B00001010,
+  B00001110,
+  B00010010,
+  B00101110,
+  B01000000,
+  B11111000,
+  B00000000
+};
+
 char keys[ROWS][COLS] = {
   {ROLL_UP,ROLL_DOWN,CLEAR,BACK_SPACE, ADV_FUNC},
   {'&','|','~',     '/',  FLOATING},
@@ -1037,8 +1050,14 @@ boolean mul(FPstack* st, FPqueue* qu){
     }
   }
   else{
-    num1.real = getQueueValue(qu);
-    num1.imaginary = 0.0;
+    if(qu->real){
+      num1.real = getQueueValue(qu);
+      num1.imaginary = 0.0;
+    }
+    else{
+      num1.real = 0.0;
+      num1.imaginary = getQueueValue(qu);
+    }
     num1.numDecimals = getNumDecimals(qu);
     clearQueue(qu);
   }
@@ -1050,7 +1069,7 @@ boolean mul(FPstack* st, FPqueue* qu){
     push(st, num1);
     return false;
   }
-  result.real = num1.real*num2.real;
+  result = complexMultiply(num1,num2);
   if(num1.numDecimals >= num2.numDecimals){
     result.numDecimals=num1.numDecimals;
   }
@@ -1106,35 +1125,47 @@ boolean dvd(FPstack* st, FPqueue* qu){
     }
   }
   else{
-    num1.real = getQueueValue(qu);
-    num1.numDecimals = getNumDecimals(qu);
-    num1.imaginary = 0;
+    
+    num1.real         = getQueueValue(qu);
+    num1.numDecimals  = getNumDecimals(qu);
+    num1.imaginary    = 0;
+    
     clearQueue(qu);
   }
   num2 = Peek(st);
   //if you can't pop the stack, then the stack is empty, 
   //so you can complete the operation
   if(!pop(st)){
+    
     num1.top=false;
     push(st, num1);
     return false;
+    
   }
   if(num1.real == 0.0){
-    errorState=divideByZero;
+    
+    errorState          = divideByZero;
+    
     push(st, num2);
     push(st, num1);
     
   }
   else{
-    result.real = num2.real/num1.real;
-    result.imaginary = 0.0;
-    result.top=false;
+    
+    result              = complexDivide(num2,num1);
+    result.top          = false;
+    
     if(num1.numDecimals >= num2.numDecimals){
-      result.numDecimals=num1.numDecimals;
+      
+      result.numDecimals = num1.numDecimals;
+      
     }
     else{
-      result.numDecimals=num2.numDecimals;
+      
+      result.numDecimals = num2.numDecimals;
+      
     }
+    
     push(st, result); 
   }
   return true;
@@ -2190,6 +2221,10 @@ const uint8_t* getAngleMode(){
       return DEGREES_SYMBOL;
       break;
     }
+    case gradians:{
+      return GRADIANS_SYMBOL;
+      break;
+    }
     default:{
       return NULL;
       break;
@@ -2237,4 +2272,30 @@ char imaginaryUnit(FPstack* st){
   else{
     return 'i';
   }
+}
+
+ComplexFloat conjugate(ComplexFloat num){
+  num.imaginary = -num.imaginary;
+  return num;
+}
+ComplexFloat complexMultiply(ComplexFloat num1, ComplexFloat num2){
+  ComplexFloat temp;
+  
+  temp.top        = false;
+  temp.real       = (num1.real*num2.real)-(num1.imaginary*num2.imaginary);
+  temp.imaginary  = (num1.real*num2.imaginary)+(num1.imaginary*num2.real);
+  
+  return temp;
+}
+
+ComplexFloat complexDivide(ComplexFloat num1, ComplexFloat num2){
+  ComplexFloat temp;
+
+  temp.top        = false;
+  num2            = conjugate(num2);
+  temp            = complexMultiply(num1,num2);
+  temp.real       = temp.real/(magnitude(num2)*magnitude(num2));
+  temp.imaginary  = temp.imaginary/(magnitude(num2)*magnitude(num2));
+  
+  return temp;
 }
